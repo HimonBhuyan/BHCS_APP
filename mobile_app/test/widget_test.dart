@@ -526,4 +526,99 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byTooltip('Back'), findsOneWidget);
   });
+
+  test(
+      '8. All workspace actions generate notifications & Chat unread count excludes hidden self-DM',
+      () {
+    SharedPreferences.setMockInitialValues({});
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final notifier = container.read(agencyStoreProvider.notifier);
+
+    // Client added
+    notifier.createClient(
+      companyName: 'Kamakhya Heritage Hospitality',
+      contactPerson: 'Rohan Nath',
+      email: 'rohan@kamakhya.in',
+      phone: '+91 98640 22334',
+      address: 'Guwahati',
+      industry: 'Hospitality',
+      service: 'Brand Strategy',
+      accountManager: 'Darshana Das',
+      contractValueInr: 180000,
+    );
+
+    // Project added & updated
+    notifier.createProject(
+      name: 'Heritage Booking Engine',
+      clientName: 'Kamakhya Heritage Hospitality',
+      category: 'Web & Booking',
+      description: 'Direct hotel reservation platform',
+      projectManager: 'Himon Bhuyan',
+      budgetInr: 180000,
+      deadline: DateTime.now().add(const Duration(days: 30)),
+    );
+    final projId = container.read(agencyStoreProvider).projects.first.id;
+    notifier.updateProjectProgress(projId, 50, 'In Progress');
+
+    // To-Do task added & updated
+    notifier.createTask(
+      title: 'Design Booking Flow Wireframes',
+      description: 'Mobile-first room search & GST checkout',
+      projectId: projId,
+      projectName: 'Heritage Booking Engine',
+      assignedEmployee: 'Darshana Das',
+      priority: 'High',
+      deadline: DateTime.now().add(const Duration(days: 5)),
+    );
+    final taskId = container.read(agencyStoreProvider).tasks.first.id;
+    notifier.updateTaskStatus(taskId, 'Completed');
+
+    // Proposal, Invoice, Payment, Expense
+    notifier.createProposal(
+      clientOrLeadName: 'Kamakhya Heritage Hospitality',
+      title: 'Annual Digital Retainer',
+      serviceCategory: 'Performance Marketing',
+      subtotalInr: 100000,
+      discountInr: 0,
+    );
+    notifier.createInvoice(
+      clientName: 'Kamakhya Heritage Hospitality',
+      projectName: 'Heritage Booking Engine',
+      serviceCategory: 'Web & Booking',
+      totalAmountInr: 118000,
+      paidAmountInr: 50000,
+    );
+    final invId = container.read(agencyStoreProvider).invoices.first.id;
+    notifier.recordInvoicePayment(invId);
+    notifier.createExpense(
+      category: 'Cloud Hosting',
+      vendorName: 'AWS India',
+      description: 'Staging & Prod clusters',
+      amountInr: 4500,
+    );
+
+    final notifs = container.read(agencyStoreProvider).notifications;
+    expect(notifs.any((n) => n.title.contains('New Client Added')), isTrue);
+    expect(notifs.any((n) => n.title.contains('New Project Added')), isTrue);
+    expect(notifs.any((n) => n.title.contains('New To-Do Task')), isTrue);
+    expect(notifs.any((n) => n.title.contains('To-Do Updated')), isTrue);
+    expect(notifs.any((n) => n.title.contains('New Proposal Sent')), isTrue);
+    expect(notifs.any((n) => n.title.contains('New GST Invoice')), isTrue);
+    expect(notifs.any((n) => n.title.contains('Payment Received')), isTrue);
+    expect(notifs.any((n) => n.title.contains('Expense Logged')), isTrue);
+
+    // Chat unread badge count checks:
+    // Himon sends DM to Darshana -> mirrors into dm-himon (hidden from Himon), so Himon's visible unread stays 0.
+    notifier.sendChatMessage(
+      threadId: 'dm-darshana',
+      body: 'Checking navbar unread bubble accuracy!',
+    );
+    expect(container.read(agencyStoreProvider).totalUnreadChatCount, 0);
+
+    // Switching to Darshana shows dm-himon as visible unread = 1.
+    notifier.loginAsFounder('emp-02');
+    expect(container.read(agencyStoreProvider).totalUnreadChatCount, 1);
+  });
 }

@@ -165,6 +165,21 @@ class MainShellScaffold extends ConsumerWidget {
     required this.navigationShell,
   });
 
+  Widget _badgedNavIcon(
+    IconData icon,
+    int count,
+    Color badgeColor, {
+    Color? iconColor,
+  }) {
+    return Badge.count(
+      count: count,
+      isLabelVisible: count > 0,
+      backgroundColor: badgeColor,
+      textColor: Colors.white,
+      child: Icon(icon, color: iconColor),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(agencyStoreProvider);
@@ -212,28 +227,30 @@ class MainShellScaffold extends ConsumerWidget {
               label: 'Home',
             ),
             NavigationDestination(
-              icon: Badge(
-                isLabelVisible: state.newLeadsCount > 0,
-                label: Text('${state.newLeadsCount}'),
-                backgroundColor: AppColors.electricBlue,
-                child: const Icon(Icons.view_kanban_outlined),
+              icon: _badgedNavIcon(
+                Icons.view_kanban_outlined,
+                state.newLeadsCount,
+                AppColors.electricBlue,
               ),
-              selectedIcon: const Icon(
+              selectedIcon: _badgedNavIcon(
                 Icons.view_kanban_rounded,
-                color: AppColors.electricBlue,
+                state.newLeadsCount,
+                AppColors.electricBlue,
+                iconColor: AppColors.electricBlue,
               ),
               label: 'Leads',
             ),
             NavigationDestination(
-              icon: Badge(
-                isLabelVisible: state.totalUnreadChatCount > 0,
-                label: Text('${state.totalUnreadChatCount}'),
-                backgroundColor: AppColors.error,
-                child: const Icon(Icons.forum_outlined),
+              icon: _badgedNavIcon(
+                Icons.forum_outlined,
+                state.totalUnreadChatCount,
+                AppColors.error,
               ),
-              selectedIcon: const Icon(
+              selectedIcon: _badgedNavIcon(
                 Icons.forum_rounded,
-                color: AppColors.electricBlue,
+                state.totalUnreadChatCount,
+                AppColors.error,
+                iconColor: AppColors.electricBlue,
               ),
               label: 'Chat',
             ),

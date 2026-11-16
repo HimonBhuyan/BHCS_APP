@@ -173,11 +173,14 @@ function sendFcmPushToTopic(string $topic, string $title, string $body, string $
             ],
             'android' => [
                 'priority' => 'HIGH',
+                'ttl' => '86400s',
                 'notification' => [
                     'channel_id' => $channelId,
                     'sound' => 'default',
                     'default_sound' => true,
                     'default_vibrate_timings' => true,
+                    'visibility' => 'PUBLIC',
+                    'notification_priority' => 'PRIORITY_MAX',
                 ],
             ],
             'apns' => [

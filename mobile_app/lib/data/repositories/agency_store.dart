@@ -59,8 +59,9 @@ class AgencyAppState {
   int get unreadNotificationCount =>
       notifications.where((n) => !n.isRead).length;
 
-  int get totalUnreadChatCount =>
-      chatThreads.fold<int>(0, (acc, t) => acc + t.unreadCount);
+  int get totalUnreadChatCount => chatThreads
+      .where((t) => t.isChannel || t.name != currentUser.name)
+      .fold<int>(0, (acc, t) => acc + t.unreadCount);
 
   double get monthlyRevenueInr => invoices
       .where((inv) => inv.status == 'Paid' || inv.status == 'Partially Paid')
@@ -501,6 +502,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
 
   static const _kSqlEndpoints = <String>[
     'http://127.0.0.1:8090/index.php?action=sync',
+    'http://192.168.29.26:8090/index.php?action=sync',
     'http://192.168.1.133:8090/index.php?action=sync',
   ];
 
@@ -607,6 +609,9 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
         state,
         remotePayload,
         state.currentUser.id,
+        previousThreads: updatedBy != state.currentUser.id
+            ? state.chatThreads
+            : null,
       );
       super.state = nextState;
       unawaited(
@@ -640,6 +645,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
   Future<String?> _pullFromLiveSqlBackend() async {
     const pullUrls = <String>[
       'http://127.0.0.1:8090/index.php?action=pull',
+      'http://192.168.29.26:8090/index.php?action=pull',
       'http://192.168.1.133:8090/index.php?action=pull',
     ];
     final client = HttpClient()
@@ -668,8 +674,9 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
   AgencyAppState _applyWorkspaceMap(
     AgencyAppState base,
     Map<String, dynamic> decoded,
-    String founderId,
-  ) {
+    String founderId, {
+    List<ChatThread>? previousThreads,
+  }) {
     var restoredLeads = base.leads;
     var restoredFollowups = base.followups;
     var restoredClients = base.clients;
@@ -890,6 +897,12 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     final unreadMap = decoded['chatThreadUnreads'] is Map
         ? Map<String, dynamic>.from(decoded['chatThreadUnreads'] as Map)
         : <String, dynamic>{};
+    final activeFounderName = base.employees
+        .firstWhere(
+          (e) => e.id == founderId,
+          orElse: () => base.currentUser,
+        )
+        .name;
 
     if (decoded['chatMessages'] is Map) {
       final msgMap = Map<String, dynamic>.from(decoded['chatMessages'] as Map);
@@ -932,8 +945,25 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
             isPinned: m['isPinned'] as bool? ?? false,
           );
         }).toList();
+
+        var effectiveUnread = savedUnread;
+        if (previousThreads != null &&
+            (t.isChannel || t.name != activeFounderName)) {
+          final prevThread = previousThreads.cast<ChatThread?>().firstWhere(
+                (p) => p?.id == t.id,
+                orElse: () => null,
+              );
+          if (prevThread != null) {
+            final prevIds = prevThread.messages.map((m) => m.id).toSet();
+            final newIncoming = msgs
+                .where((m) => !prevIds.contains(m.id) && m.senderId != founderId)
+                .length;
+            effectiveUnread = prevThread.unreadCount + newIncoming;
+          }
+        }
+
         return t.copyWith(
-          unreadCount: savedUnread,
+          unreadCount: effectiveUnread,
           messages: msgs,
           lastMessagePreview: '${msgs.last.senderName}: ${msgs.last.body}',
           lastActivity: msgs.last.timestamp,
@@ -972,15 +1002,24 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
         orElse: () => state.employees.first,
       );
 
-      Map<String, dynamic>? decodedMap;
+      var nextState = state.copyWith(
+        isLoggedIn: isLoggedIn,
+        hasCompletedOnboarding: onboardingDone,
+        currentUser: matchedFounder,
+        themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
+      );
 
-      // 1. Try local persisted workspace cache first
+      // 1. Try local persisted workspace cache first (preserves unread counts)
       final rawJson = prefs.getString(_kWorkspaceJson);
-      if (rawJson != null && rawJson.isNotEmpty) {
-        decodedMap = jsonDecode(rawJson) as Map<String, dynamic>;
+      final hasLocalCache = rawJson != null && rawJson.isNotEmpty;
+      if (hasLocalCache) {
+        final localMap = jsonDecode(rawJson) as Map<String, dynamic>;
+        _lastSyncedJson = rawJson;
+        nextState = _applyWorkspaceMap(nextState, localMap, matchedFounder.id);
       }
 
       // 2. If Cloud Firestore (`krypt-6a44c`) is ready, pull the latest cloud snapshot
+      Map<String, dynamic>? remoteMap;
       if (_isFirebaseReady) {
         try {
           final snap = await FirebaseFirestore.instance
@@ -989,7 +1028,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
               .get();
           final data = snap.data();
           if (data != null && data['payload'] is Map) {
-            decodedMap = Map<String, dynamic>.from(data['payload'] as Map);
+            remoteMap = Map<String, dynamic>.from(data['payload'] as Map);
           }
         } catch (_) {
           // Non-blocking fallback to SQL/local cache
@@ -998,24 +1037,23 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       }
 
       // 3. Fallback to XAMPP MySQL if still empty
-      if (decodedMap == null &&
+      if (remoteMap == null &&
+          !hasLocalCache &&
           !Platform.environment.containsKey('FLUTTER_TEST')) {
         final sqlJson = await _pullFromLiveSqlBackend();
         if (sqlJson != null && sqlJson.isNotEmpty) {
-          decodedMap = jsonDecode(sqlJson) as Map<String, dynamic>;
+          remoteMap = jsonDecode(sqlJson) as Map<String, dynamic>;
         }
       }
 
-      var nextState = state.copyWith(
-        isLoggedIn: isLoggedIn,
-        hasCompletedOnboarding: onboardingDone,
-        currentUser: matchedFounder,
-        themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
-      );
-
-      if (decodedMap != null) {
-        _lastSyncedJson = jsonEncode(decodedMap);
-        nextState = _applyWorkspaceMap(nextState, decodedMap, matchedFounder.id);
+      if (remoteMap != null) {
+        _lastSyncedJson = jsonEncode(remoteMap);
+        nextState = _applyWorkspaceMap(
+          nextState,
+          remoteMap,
+          matchedFounder.id,
+          previousThreads: hasLocalCache ? nextState.chatThreads : null,
+        );
       }
 
       super.state = nextState;
@@ -1130,6 +1168,47 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     );
   }
 
+  AppNotification _buildNotification({
+    required String category,
+    required String title,
+    required String body,
+    required String targetRoute,
+    String? entityId,
+    List<String> actions = const [],
+  }) {
+    final now = DateTime.now();
+    return AppNotification(
+      id: 'notif-${now.microsecondsSinceEpoch}',
+      category: category,
+      title: title,
+      body: body,
+      timestamp: now,
+      targetRoute: targetRoute,
+      entityId: entityId,
+      actions: actions,
+    );
+  }
+
+  void _pushRemoteNotification(
+    AppNotification notif, {
+    List<String>? targetFounderIds,
+    bool includeAllFounders = false,
+  }) {
+    if (state.isOfflineMode) return;
+    if (!_shouldSurfaceNotification(notif.category)) return;
+    unawaited(
+      BhNotificationService.instance.dispatchRemoteFcmPush(
+        title: notif.title,
+        body: notif.body,
+        senderId: state.currentUser.id,
+        category: notif.category,
+        targetRoute: notif.targetRoute ?? '/notifications',
+        targetFounderIds: targetFounderIds,
+        includeAllFounders: includeAllFounders,
+      ),
+    );
+  }
+
   void createLead({
     required String companyName,
     required String contactPerson,
@@ -1236,10 +1315,11 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     }).toList();
 
     var updatedClients = state.clients;
+    ClientRecord? autoClient;
     if (convertedLead != null &&
         !state.clients
             .any((c) => c.companyName == convertedLead!.companyName)) {
-      final newClient = ClientRecord(
+      autoClient = ClientRecord(
         id: 'cli-${now.millisecondsSinceEpoch}',
         clientCode: 'BH-CL-${101 + state.clients.length}',
         companyName: convertedLead!.companyName,
@@ -1259,13 +1339,38 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
         notes:
             'Automatically created from converted lead ${convertedLead!.leadCode}.',
       );
-      updatedClients = [newClient, ...state.clients];
+      updatedClients = [autoClient, ...state.clients];
     }
+
+    final changedLead = updatedLeads.cast<LeadRecord?>().firstWhere(
+          (l) => l?.id == leadId,
+          orElse: () => null,
+        );
+    final statusNotif = changedLead != null
+        ? _buildNotification(
+            category: 'Leads',
+            title: autoClient != null
+                ? 'Lead Converted & Client Added: ${changedLead.companyName}'
+                : 'Lead Updated: ${changedLead.companyName}',
+            body: autoClient != null
+                ? 'Onboarded by ${state.currentUser.name} • ${changedLead.interestedService}'
+                : 'Stage moved to $newStatus by ${state.currentUser.name}',
+            targetRoute: autoClient != null ? '/clients' : '/leads/$leadId',
+            entityId: leadId,
+            actions: [autoClient != null ? 'Open Clients' : 'View Lead'],
+          )
+        : null;
 
     state = state.copyWith(
       leads: updatedLeads,
       clients: updatedClients,
+      notifications: statusNotif != null
+          ? [statusNotif, ...state.notifications]
+          : state.notifications,
     );
+    if (statusNotif != null) {
+      _pushRemoteNotification(statusNotif);
+    }
   }
 
   void createClient({
@@ -1299,12 +1404,26 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       onboardedAt: now,
       notes: 'Onboarded by ${state.currentUser.name}.',
     );
-    state = state.copyWith(clients: [newClient, ...state.clients]);
+    final newNotif = _buildNotification(
+      category: 'Projects',
+      title: 'New Client Added: $companyName',
+      body:
+          '$service • Value ${BhFormatters.inr(contractValueInr)} • Lead: $accountManager',
+      targetRoute: '/clients',
+      entityId: newClient.id,
+      actions: const ['Open Clients'],
+    );
+    state = state.copyWith(
+      clients: [newClient, ...state.clients],
+      notifications: [newNotif, ...state.notifications],
+    );
+    _pushRemoteNotification(newNotif);
   }
 
   void addLeadNote(String leadId, String noteText,
       {String type = 'note', String? customTitle}) {
     final now = DateTime.now();
+    LeadRecord? matchedLead;
     final updatedLeads = state.leads.map((lead) {
       if (lead.id != leadId) return lead;
       final item = LeadActivityItem(
@@ -1315,12 +1434,31 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
         actorName: state.currentUser.name,
         timestamp: now,
       );
-      return lead.copyWith(
+      matchedLead = lead.copyWith(
         notes: noteText,
         timeline: [item, ...lead.timeline],
       );
+      return matchedLead!;
     }).toList();
-    state = state.copyWith(leads: updatedLeads);
+    final noteNotif = matchedLead != null
+        ? _buildNotification(
+            category: 'Leads',
+            title: customTitle ?? 'Lead Note: ${matchedLead!.companyName}',
+            body: '${state.currentUser.name}: $noteText',
+            targetRoute: '/leads/$leadId',
+            entityId: leadId,
+            actions: const ['View Lead'],
+          )
+        : null;
+    state = state.copyWith(
+      leads: updatedLeads,
+      notifications: noteNotif != null
+          ? [noteNotif, ...state.notifications]
+          : state.notifications,
+    );
+    if (noteNotif != null) {
+      _pushRemoteNotification(noteNotif);
+    }
   }
 
   void scheduleLeadFollowup({
@@ -1386,14 +1524,38 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
         ),
       );
     }
+    _pushRemoteNotification(newNotif);
   }
 
   void toggleFollowupCompleted(String followupId) {
+    LeadFollowupItem? toggled;
     final updated = state.followups.map((f) {
       if (f.id != followupId) return f;
-      return f.copyWith(isCompleted: !f.isCompleted);
+      toggled = f.copyWith(isCompleted: !f.isCompleted);
+      return toggled!;
     }).toList();
-    state = state.copyWith(followups: updated);
+    final fuNotif = toggled != null
+        ? _buildNotification(
+            category: 'Leads',
+            title: toggled!.isCompleted
+                ? 'Follow-up Completed: ${toggled!.companyName}'
+                : 'Follow-up Reopened: ${toggled!.companyName}',
+            body:
+                '${toggled!.followupType} marked ${toggled!.isCompleted ? 'done' : 'pending'} by ${state.currentUser.name}',
+            targetRoute: '/leads/${toggled!.leadId}',
+            entityId: toggled!.leadId,
+            actions: const ['View Lead'],
+          )
+        : null;
+    state = state.copyWith(
+      followups: updated,
+      notifications: fuNotif != null
+          ? [fuNotif, ...state.notifications]
+          : state.notifications,
+    );
+    if (fuNotif != null) {
+      _pushRemoteNotification(fuNotif);
+    }
   }
 
   String? _dmThreadIdForFounderId(String founderId) {
@@ -1595,7 +1757,19 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       lastActivity: now,
       messages: const [],
     );
-    state = state.copyWith(chatThreads: [newChannel, ...state.chatThreads]);
+    final notif = _buildNotification(
+      category: 'Messages',
+      title: 'New Chat Channel: #${name.trim()}',
+      body: '${subtitle.trim()} • Created by ${state.currentUser.name}',
+      targetRoute: '/chat',
+      entityId: newChannel.id,
+      actions: const ['Open Chat'],
+    );
+    state = state.copyWith(
+      chatThreads: [newChannel, ...state.chatThreads],
+      notifications: [notif, ...state.notifications],
+    );
+    _pushRemoteNotification(notif);
   }
 
   void clearThreadMessages(String threadId) {
@@ -1635,15 +1809,47 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       status: 'In Progress',
       progressPercentage: 0,
     );
-    state = state.copyWith(projects: [newProj, ...state.projects]);
+    final notif = _buildNotification(
+      category: 'Projects',
+      title: 'New Project Added: $name',
+      body:
+          'Client: $clientName • PM: $projectManager • Budget ${BhFormatters.inr(budgetInr)}',
+      targetRoute: '/projects',
+      entityId: newProj.id,
+      actions: const ['Open Projects'],
+    );
+    state = state.copyWith(
+      projects: [newProj, ...state.projects],
+      notifications: [notif, ...state.notifications],
+    );
+    _pushRemoteNotification(notif);
   }
 
   void updateProjectProgress(String projectId, int newProgress, String status) {
+    ProjectRecord? changed;
     final updated = state.projects.map((p) {
       if (p.id != projectId) return p;
-      return p.copyWith(progressPercentage: newProgress, status: status);
+      changed = p.copyWith(progressPercentage: newProgress, status: status);
+      return changed!;
     }).toList();
-    state = state.copyWith(projects: updated);
+    final notif = changed != null
+        ? _buildNotification(
+            category: 'Projects',
+            title: 'Project Update: ${changed!.name}',
+            body: '$status • $newProgress% complete • ${state.currentUser.name}',
+            targetRoute: '/projects',
+            entityId: projectId,
+            actions: const ['Open Projects'],
+          )
+        : null;
+    state = state.copyWith(
+      projects: updated,
+      notifications:
+          notif != null ? [notif, ...state.notifications] : state.notifications,
+    );
+    if (notif != null) {
+      _pushRemoteNotification(notif);
+    }
   }
 
   void createTask({
@@ -1669,15 +1875,60 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       startDate: now,
       deadline: deadline,
     );
-    state = state.copyWith(tasks: [task, ...state.tasks]);
+    final notif = _buildNotification(
+      category: 'Tasks',
+      title: 'New To-Do Task: $title',
+      body:
+          '$projectName • Assigned to $assignedEmployee ($priority Priority)',
+      targetRoute: '/tasks',
+      entityId: task.id,
+      actions: const ['Open Tasks'],
+    );
+    state = state.copyWith(
+      tasks: [task, ...state.tasks],
+      notifications: [notif, ...state.notifications],
+    );
+    if (state.notificationPrefs.taskReminders) {
+      unawaited(
+        BhNotificationService.instance.scheduleReminderSequence(
+          entityId: task.id,
+          title: 'To-Do Due: $title',
+          subtitle: '$projectName • Assigned to $assignedEmployee',
+          targetTime: deadline,
+          category: 'Tasks',
+          targetRoute: '/tasks',
+        ),
+      );
+    }
+    _pushRemoteNotification(notif);
   }
 
   void updateTaskStatus(String taskId, String newStatus) {
+    TaskItem? changed;
     final updated = state.tasks.map((t) {
       if (t.id != taskId) return t;
-      return t.copyWith(status: newStatus);
+      changed = t.copyWith(status: newStatus);
+      return changed!;
     }).toList();
-    state = state.copyWith(tasks: updated);
+    final notif = changed != null
+        ? _buildNotification(
+            category: 'Tasks',
+            title: 'To-Do Updated: ${changed!.title}',
+            body:
+                'Status moved to $newStatus • ${changed!.projectName} • ${state.currentUser.name}',
+            targetRoute: '/tasks',
+            entityId: taskId,
+            actions: const ['Open Tasks'],
+          )
+        : null;
+    state = state.copyWith(
+      tasks: updated,
+      notifications:
+          notif != null ? [notif, ...state.notifications] : state.notifications,
+    );
+    if (notif != null) {
+      _pushRemoteNotification(notif);
+    }
   }
 
   void scheduleMeeting({
@@ -1851,7 +2102,20 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       status: 'Sent',
       preparedBy: state.currentUser.name,
     );
-    state = state.copyWith(proposals: [prop, ...state.proposals]);
+    final notif = _buildNotification(
+      category: 'Payments',
+      title: 'New Proposal Sent: $title',
+      body:
+          '$clientOrLeadName • ${BhFormatters.inr(total)} incl. 18% GST • By ${state.currentUser.name}',
+      targetRoute: '/finance',
+      entityId: prop.id,
+      actions: const ['Open Finance'],
+    );
+    state = state.copyWith(
+      proposals: [prop, ...state.proposals],
+      notifications: [notif, ...state.notifications],
+    );
+    _pushRemoteNotification(notif);
   }
 
   void createInvoice({
@@ -1876,18 +2140,51 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
           ? 'Paid'
           : (paidAmountInr > 0 ? 'Partially Paid' : 'Sent'),
     );
-    state = state.copyWith(invoices: [inv, ...state.invoices]);
+    final notif = _buildNotification(
+      category: 'Payments',
+      title: 'New GST Invoice: ${inv.invoiceNumber}',
+      body:
+          '$clientName ($projectName) • ${BhFormatters.inr(totalAmountInr)} • ${inv.status}',
+      targetRoute: '/finance',
+      entityId: inv.id,
+      actions: const ['Open Finance'],
+    );
+    state = state.copyWith(
+      invoices: [inv, ...state.invoices],
+      notifications: [notif, ...state.notifications],
+    );
+    _pushRemoteNotification(notif);
   }
 
   void recordInvoicePayment(String invoiceId) {
+    InvoiceRecord? paidInv;
     final updated = state.invoices.map((inv) {
       if (inv.id != invoiceId) return inv;
-      return inv.copyWith(
+      paidInv = inv.copyWith(
         paidAmountInr: inv.totalAmountInr,
         status: 'Paid',
       );
+      return paidInv!;
     }).toList();
-    state = state.copyWith(invoices: updated);
+    final notif = paidInv != null
+        ? _buildNotification(
+            category: 'Payments',
+            title: 'Payment Received: ${paidInv!.invoiceNumber}',
+            body:
+                '${paidInv!.clientName} • ${BhFormatters.inr(paidInv!.totalAmountInr)} marked Paid',
+            targetRoute: '/finance',
+            entityId: invoiceId,
+            actions: const ['Open Finance'],
+          )
+        : null;
+    state = state.copyWith(
+      invoices: updated,
+      notifications:
+          notif != null ? [notif, ...state.notifications] : state.notifications,
+    );
+    if (notif != null) {
+      _pushRemoteNotification(notif);
+    }
   }
 
   void createExpense({
@@ -1906,7 +2203,19 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       amountInr: amountInr,
       date: now,
     );
-    state = state.copyWith(expenses: [exp, ...state.expenses]);
+    final notif = _buildNotification(
+      category: 'Payments',
+      title: 'Expense Logged: $category',
+      body: '$vendorName • ${BhFormatters.inr(amountInr)} • $description',
+      targetRoute: '/finance',
+      entityId: exp.id,
+      actions: const ['Open Finance'],
+    );
+    state = state.copyWith(
+      expenses: [exp, ...state.expenses],
+      notifications: [notif, ...state.notifications],
+    );
+    _pushRemoteNotification(notif);
   }
 
   /// Dynamic AI Business Assistant response generator using live agency state.

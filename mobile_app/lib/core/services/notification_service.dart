@@ -341,17 +341,31 @@ class BhNotificationService {
         try {
           final tzFire = tz.TZDateTime.from(fireAt, tz.local);
           final notifId = (entityId.hashCode + i) & 0x7FFFFFFF;
-          await _localPlugin.zonedSchedule(
-            notifId,
-            '$title • ${intervals[i].$1}',
-            subtitle,
-            tzFire,
-            _detailsForCategory(category),
-            payload: targetRoute,
-            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-            uiLocalNotificationDateInterpretation:
-                UILocalNotificationDateInterpretation.absoluteTime,
-          );
+          try {
+            await _localPlugin.zonedSchedule(
+              notifId,
+              '$title • ${intervals[i].$1}',
+              subtitle,
+              tzFire,
+              _detailsForCategory(category),
+              payload: targetRoute,
+              androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+              uiLocalNotificationDateInterpretation:
+                  UILocalNotificationDateInterpretation.absoluteTime,
+            );
+          } catch (_) {
+            await _localPlugin.zonedSchedule(
+              notifId,
+              '$title • ${intervals[i].$1}',
+              subtitle,
+              tzFire,
+              _detailsForCategory(category),
+              payload: targetRoute,
+              androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+              uiLocalNotificationDateInterpretation:
+                  UILocalNotificationDateInterpretation.absoluteTime,
+            );
+          }
         } catch (_) {}
       }
     }
@@ -395,6 +409,7 @@ class BhNotificationService {
     if (_isTestEnv) return;
     const pushEndpoints = <String>[
       'http://127.0.0.1:8090/index.php?action=send_push',
+      'http://192.168.29.26:8090/index.php?action=send_push',
       'http://192.168.1.133:8090/index.php?action=send_push',
     ];
     final client = HttpClient()
