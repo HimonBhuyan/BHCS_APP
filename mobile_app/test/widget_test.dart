@@ -7,6 +7,7 @@ import 'package:blue_hour_hq/core/theme/app_theme.dart';
 import 'package:blue_hour_hq/data/models/agency_models.dart';
 import 'package:blue_hour_hq/data/repositories/agency_store.dart';
 import 'package:blue_hour_hq/features/chat/chat_screen.dart';
+import 'package:blue_hour_hq/features/notifications/notification_centre_screen.dart';
 
 void main() {
   setUp(() {
@@ -448,5 +449,64 @@ void main() {
 
     notifier.markAllNotificationsRead();
     expect(container.read(agencyStoreProvider).unreadNotificationCount, 0);
+  });
+
+  testWidgets(
+      '7. Notifications UI: Swipe-to-remove, Undo restore & Clear all',
+      (WidgetTester tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final notifier = container.read(agencyStoreProvider.notifier);
+    await notifier.triggerTestPushNotification();
+    notifier.createLead(
+      companyName: 'Swipe Test Studio',
+      contactPerson: 'Aarav',
+      phone: '+91 98640 00000',
+      email: 'aarav@example.com',
+      source: 'Website',
+      interestedService: 'Brand Identity',
+      budgetInr: 75000,
+      priority: 'High',
+      assignedEmployee: 'Himon Bhuyan',
+      location: 'Guwahati, Assam',
+      industry: 'Design Studio',
+      notes: 'Swipe-to-dismiss verification alert',
+    );
+    expect(container.read(agencyStoreProvider).notifications.length, 2);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.darkTheme,
+          home: const NotificationCentreScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(Dismissible), findsNWidgets(2));
+
+    // Swipe first notification card to remove it
+    await tester.drag(
+      find.byType(Dismissible).first,
+      const Offset(-500, 0),
+    );
+    await tester.pumpAndSettle();
+
+    expect(container.read(agencyStoreProvider).notifications.length, 1);
+    expect(find.text('Undo'), findsOneWidget);
+
+    // Tap Undo to restore the dismissed notification
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(container.read(agencyStoreProvider).notifications.length, 2);
+
+    // Clear all remaining notifications
+    notifier.clearNotifications();
+    await tester.pumpAndSettle();
+    expect(container.read(agencyStoreProvider).notifications, isEmpty);
+    expect(find.text('Zero unread studio alerts'), findsOneWidget);
   });
 }

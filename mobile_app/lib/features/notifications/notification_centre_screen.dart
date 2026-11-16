@@ -196,6 +196,84 @@ class _NotificationCentreScreenState
     }
   }
 
+  Widget _buildSwipeBackground(Alignment alignment) {
+    final isLeft = alignment == Alignment.centerLeft;
+    return Container(
+      alignment: alignment,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: AppColors.error.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: AppColors.error.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isLeft) ...[
+            const Icon(
+              Icons.delete_outline_rounded,
+              color: AppColors.error,
+              size: 20,
+            ),
+            const SizedBox(width: 6),
+            const Text(
+              'Remove',
+              style: TextStyle(
+                color: AppColors.error,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ] else ...[
+            const Text(
+              'Remove',
+              style: TextStyle(
+                color: AppColors.error,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(width: 6),
+            const Icon(
+              Icons.delete_outline_rounded,
+              color: AppColors.error,
+              size: 20,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmClearAll(AgencyStoreNotifier notifier) async {
+    final scopeLabel = _selectedCategory == 'All'
+        ? 'all notifications'
+        : 'all $_selectedCategory notifications';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear notifications?'),
+        content: Text('Remove $scopeLabel from your Notification Centre?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      notifier.clearNotifications(category: _selectedCategory);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(agencyStoreProvider);
@@ -209,13 +287,18 @@ class _NotificationCentreScreenState
 
     return Scaffold(
       appBar: AppBar(
+        titleSpacing: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Notification Centre'),
+            const Text(
+              'Notifications',
+              overflow: TextOverflow.ellipsis,
+            ),
             Text(
-              '${state.unreadNotificationCount} unread alerts • FCM & APNs synced',
+              '${state.unreadNotificationCount} unread • Swipe to remove',
               style: textTheme.labelSmall,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -225,13 +308,18 @@ class _NotificationCentreScreenState
             onPressed: notifier.triggerTestPushNotification,
             icon: const Icon(Icons.notification_add_outlined),
           ),
-          TextButton(
-            onPressed: notifier.markAllNotificationsRead,
-            child: const Text(
-              'Mark all read',
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+          if (state.unreadNotificationCount > 0)
+            IconButton(
+              tooltip: 'Mark all read',
+              onPressed: notifier.markAllNotificationsRead,
+              icon: const Icon(Icons.done_all_rounded),
             ),
-          ),
+          if (filtered.isNotEmpty)
+            IconButton(
+              tooltip: 'Clear all notifications',
+              onPressed: () => _confirmClearAll(notifier),
+              icon: const Icon(Icons.delete_sweep_outlined),
+            ),
           IconButton(
             tooltip: 'Notification Preferences',
             onPressed: _showNotificationPreferencesSheet,
@@ -289,108 +377,139 @@ class _NotificationCentreScreenState
                 final item = filtered[index];
                 final color = _categoryColor(item.category);
 
-                return BhSurfaceCard(
-                  borderColor: item.isRead
-                      ? null
-                      : AppColors.electricBlue.withValues(alpha: 0.55),
-                  onTap: () {
-                    notifier.markNotificationRead(item.id);
-                    if (item.targetRoute != null) {
-                      context.push(item.targetRoute!);
-                    }
-                  },
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: color.withValues(alpha: 0.16),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Icon(
-                              _categoryIcon(item.category),
-                              color: color,
-                              size: 20,
-                            ),
+                return Dismissible(
+                  key: ValueKey('notif_${item.id}'),
+                  direction: DismissDirection.horizontal,
+                  background: _buildSwipeBackground(Alignment.centerLeft),
+                  secondaryBackground:
+                      _buildSwipeBackground(Alignment.centerRight),
+                  onDismissed: (_) {
+                    final originalIndex = state.notifications
+                        .indexWhere((n) => n.id == item.id);
+                    notifier.removeNotification(item.id);
+                    final messenger = ScaffoldMessenger.of(context);
+                    messenger
+                      ..clearSnackBars()
+                      ..showSnackBar(
+                        SnackBar(
+                          behavior: SnackBarBehavior.floating,
+                          duration: const Duration(seconds: 4),
+                          content: Text('Removed "${item.title}"'),
+                          action: SnackBarAction(
+                            label: 'Undo',
+                            onPressed: () {
+                              notifier.restoreNotification(
+                                item,
+                                index: originalIndex < 0 ? 0 : originalIndex,
+                              );
+                            },
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    BhStatusPill(
-                                      label: item.category,
-                                      color: color,
-                                      compact: true,
-                                    ),
-                                    Text(
-                                      BhFormatters.relativeTime(item.timestamp),
-                                      style: textTheme.labelSmall,
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  item.title,
-                                  style: textTheme.titleMedium?.copyWith(
-                                    fontWeight: item.isRead
-                                        ? FontWeight.w600
-                                        : FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  item.body,
-                                  style: textTheme.bodySmall?.copyWith(
-                                    height: 1.4,
-                                  ),
-                                ),
-                              ],
+                        ),
+                      );
+                  },
+                  child: BhSurfaceCard(
+                    borderColor: item.isRead
+                        ? null
+                        : AppColors.electricBlue.withValues(alpha: 0.55),
+                    onTap: () {
+                      notifier.markNotificationRead(item.id);
+                      if (item.targetRoute != null) {
+                        context.push(item.targetRoute!);
+                      }
+                    },
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: color.withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(
+                                _categoryIcon(item.category),
+                                color: color,
+                                size: 20,
+                              ),
                             ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      BhStatusPill(
+                                        label: item.category,
+                                        color: color,
+                                        compact: true,
+                                      ),
+                                      Text(
+                                        BhFormatters.relativeTime(item.timestamp),
+                                        style: textTheme.labelSmall,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    item.title,
+                                    style: textTheme.titleMedium?.copyWith(
+                                      fontWeight: item.isRead
+                                          ? FontWeight.w600
+                                          : FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    item.body,
+                                    style: textTheme.bodySmall?.copyWith(
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (item.actions.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: item.actions.map((act) {
+                              return OutlinedButton(
+                                onPressed: () {
+                                  notifier.markNotificationRead(item.id);
+                                  if (item.targetRoute != null) {
+                                    context.push(item.targetRoute!);
+                                  }
+                                },
+                                style: OutlinedButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  side: BorderSide(
+                                    color: color.withValues(alpha: 0.45),
+                                  ),
+                                ),
+                                child: Text(
+                                  act,
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: color,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
                           ),
                         ],
-                      ),
-                      if (item.actions.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 6,
-                          children: item.actions.map((act) {
-                            return OutlinedButton(
-                              onPressed: () {
-                                notifier.markNotificationRead(item.id);
-                                if (item.targetRoute != null) {
-                                  context.push(item.targetRoute!);
-                                }
-                              },
-                              style: OutlinedButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                                side: BorderSide(
-                                  color: color.withValues(alpha: 0.45),
-                                ),
-                              ),
-                              child: Text(
-                                act,
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: color,
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
                       ],
-                    ],
+                    ),
                   ),
                 );
               },

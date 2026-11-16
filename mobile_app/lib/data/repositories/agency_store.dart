@@ -1798,6 +1798,30 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     state = state.copyWith(notifications: updated);
   }
 
+  /// Removes a single notification card and syncs the deletion locally & remotely.
+  void removeNotification(String id) {
+    final updated = state.notifications.where((n) => n.id != id).toList();
+    if (updated.length == state.notifications.length) return;
+    state = state.copyWith(notifications: updated);
+  }
+
+  /// Re-inserts a dismissed notification (used for swipe-to-dismiss Undo).
+  void restoreNotification(AppNotification notification, {int? index}) {
+    if (state.notifications.any((n) => n.id == notification.id)) return;
+    final updated = [...state.notifications];
+    final insertAt = (index ?? 0).clamp(0, updated.length);
+    updated.insert(insertAt, notification);
+    state = state.copyWith(notifications: updated);
+  }
+
+  /// Clears all notifications (or only the selected category).
+  void clearNotifications({String? category}) {
+    final updated = (category == null || category == 'All')
+        ? <AppNotification>[]
+        : state.notifications.where((n) => n.category != category).toList();
+    state = state.copyWith(notifications: updated);
+  }
+
   void updateNotificationPreferences(NotificationPreferencesState prefs) {
     state = state.copyWith(notificationPrefs: prefs);
   }

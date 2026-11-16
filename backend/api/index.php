@@ -597,8 +597,9 @@ if ($action === 'sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // 10. Sync Notifications
+        // 10. Sync Notifications (replace so swiped/cleared alerts stay removed)
         if (isset($payload['notifications']) && is_array($payload['notifications'])) {
+            $pdo->exec("DELETE FROM `notifications`");
             $stmt = $pdo->prepare("
                 INSERT INTO `notifications` (
                     `id`, `category`, `title`, `body`, `timestamp`, `is_read`,
