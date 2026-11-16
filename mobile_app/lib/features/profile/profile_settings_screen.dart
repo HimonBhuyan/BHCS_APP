@@ -443,6 +443,57 @@ class ProfileAndSettingsScreen extends ConsumerWidget {
                       }
                     },
                   ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.error,
+                        side: BorderSide(
+                          color: AppColors.error.withValues(alpha: 0.45),
+                        ),
+                      ),
+                      onPressed: () async {
+                        final ok = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Clear all studio data?'),
+                            content: const Text(
+                              'This removes all leads, clients, projects, tasks, meetings, invoices, notifications, and chat messages across Firestore, MySQL, and this device.',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, false),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppColors.error,
+                                ),
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: const Text('Clear All Data'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (ok == true && context.mounted) {
+                          notifier.resetWorkspaceToClean();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Workspace cleared across Firestore, MySQL & device.',
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.cleaning_services_rounded, size: 17),
+                      label: const Text(
+                        'Wipe All Demo / Test Data',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             )

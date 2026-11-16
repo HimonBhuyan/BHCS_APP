@@ -2462,6 +2462,34 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     );
   }
 
+  /// Wipes all demo/test records across CRM, Projects, Tasks, Meetings, Finance,
+  /// Notifications & Chat while keeping the 3 Founders and 4 thread rooms intact.
+  void resetWorkspaceToClean() {
+    if (!state.currentUser.isSuperAdmin) return;
+    final cleanThreads = state.chatThreads
+        .map(
+          (t) => t.copyWith(
+            unreadCount: 0,
+            lastMessagePreview: 'No messages yet',
+            messages: const [],
+          ),
+        )
+        .toList();
+    state = state.copyWith(
+      leads: const [],
+      followups: const [],
+      clients: const [],
+      projects: const [],
+      tasks: const [],
+      meetings: const [],
+      notifications: const [],
+      proposals: const [],
+      invoices: const [],
+      expenses: const [],
+      chatThreads: cleanThreads,
+    );
+  }
+
   void createProposal({
     required String clientOrLeadName,
     required String title,

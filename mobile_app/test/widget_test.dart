@@ -780,5 +780,13 @@ void main() {
     expect(container.read(agencyStoreProvider).projects, isEmpty);
     expect(container.read(agencyStoreProvider).clients, isEmpty);
     expect(container.read(agencyStoreProvider).leads, isEmpty);
+
+    // Super Admin reset wipes all remaining invoices, expenses, notifications & chat messages
+    notifier.resetWorkspaceToClean();
+    final wiped = container.read(agencyStoreProvider);
+    expect(wiped.invoices, isEmpty);
+    expect(wiped.expenses, isEmpty);
+    expect(wiped.notifications, isEmpty);
+    expect(wiped.chatThreads.every((t) => t.messages.isEmpty), isTrue);
   });
 }
