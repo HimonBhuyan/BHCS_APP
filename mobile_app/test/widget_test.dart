@@ -621,4 +621,164 @@ void main() {
     notifier.loginAsFounder('emp-02');
     expect(container.read(agencyStoreProvider).totalUnreadChatCount, 1);
   });
+
+  test(
+      '9. Power-Ups: Biometric toggle, @Mentions, Edit/Delete CRUD, Profit/Loss & AI Drafts',
+      () {
+    SharedPreferences.setMockInitialValues({});
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final notifier = container.read(agencyStoreProvider.notifier);
+
+    // Biometric lock toggle
+    notifier.toggleBiometricLock(true);
+    expect(container.read(agencyStoreProvider).biometricLockEnabled, isTrue);
+
+    // @Mention in Founders Board generates mention priority alert
+    notifier.sendChatMessage(
+      threadId: 'founders-hq',
+      body: '@Darshana Das please review the pitch deck!',
+    );
+    expect(
+      container
+          .read(agencyStoreProvider)
+          .notifications
+          .any((n) => n.title.contains('Mentioned')),
+      isTrue,
+    );
+
+    // Create + Edit + Delete Lead, Client, Project, Task, Meeting, Proposal, Invoice, Expense
+    notifier.createLead(
+      companyName: 'Edit Test Co',
+      contactPerson: 'Zoya',
+      phone: '+91 98640 12345',
+      email: 'zoya@edittest.in',
+      source: 'Website',
+      interestedService: 'UI/UX Design',
+      budgetInr: 90000,
+      priority: 'Medium',
+      assignedEmployee: 'Himon Bhuyan',
+      location: 'Guwahati',
+      industry: 'SaaS',
+      notes: 'Initial note',
+    );
+    final leadId = container.read(agencyStoreProvider).leads.first.id;
+    notifier.updateLead(
+      leadId: leadId,
+      companyName: 'Edit Test Co Updated',
+      contactPerson: 'Zoya',
+      phone: '+91 98640 12345',
+      email: 'zoya@edittest.in',
+      priority: 'Hot',
+      budgetInr: 120000,
+      notes: 'Updated budget',
+    );
+    expect(
+      container.read(agencyStoreProvider).leads.first.companyName,
+      'Edit Test Co Updated',
+    );
+
+    notifier.createClient(
+      companyName: 'Client CRUD Co',
+      contactPerson: 'Kabir',
+      email: 'kabir@clientcrud.in',
+      phone: '+91 98640 55555',
+      address: 'Guwahati',
+      industry: 'Retail',
+      service: 'E-commerce Development',
+      accountManager: 'Darshana Das',
+      contractValueInr: 200000,
+    );
+    final clientId = container.read(agencyStoreProvider).clients.first.id;
+    notifier.updateClient(
+      clientId: clientId,
+      companyName: 'Client CRUD Updated',
+      contactPerson: 'Kabir',
+      email: 'kabir@clientcrud.in',
+      phone: '+91 98640 55555',
+      status: 'Retainer',
+      notes: 'Monthly retainer',
+    );
+    expect(container.read(agencyStoreProvider).clients.first.status, 'Retainer');
+
+    notifier.createProject(
+      name: 'CRUD Project',
+      clientName: 'Client CRUD Updated',
+      category: 'Web Applications',
+      description: 'Initial scope',
+      projectManager: 'Himon Bhuyan',
+      budgetInr: 200000,
+      deadline: DateTime.now().add(const Duration(days: 20)),
+    );
+    final projectId = container.read(agencyStoreProvider).projects.first.id;
+    notifier.updateProject(
+      projectId: projectId,
+      name: 'CRUD Project v2',
+      clientName: 'Client CRUD Updated',
+      description: 'Refined scope',
+      projectManager: 'Drishant Das',
+      budgetInr: 225000,
+      deadline: DateTime.now().add(const Duration(days: 25)),
+    );
+    expect(
+      container.read(agencyStoreProvider).projects.first.name,
+      'CRUD Project v2',
+    );
+
+    notifier.createTask(
+      title: 'Initial Task',
+      description: 'Task notes',
+      projectId: projectId,
+      projectName: 'CRUD Project v2',
+      assignedEmployee: 'Himon Bhuyan',
+      priority: 'Medium',
+      deadline: DateTime.now().add(const Duration(days: 4)),
+    );
+    final taskId = container.read(agencyStoreProvider).tasks.first.id;
+    notifier.updateTask(
+      taskId: taskId,
+      title: 'Updated Task',
+      description: 'Done specs',
+      assignedEmployee: 'Darshana Das',
+      priority: 'Critical',
+      deadline: DateTime.now().add(const Duration(days: 3)),
+    );
+    expect(container.read(agencyStoreProvider).tasks.first.title, 'Updated Task');
+
+    notifier.createInvoice(
+      clientName: 'Client CRUD Updated',
+      projectName: 'CRUD Project v2',
+      serviceCategory: 'Web Applications',
+      totalAmountInr: 100000,
+      paidAmountInr: 100000,
+    );
+    notifier.createExpense(
+      category: 'Cloud',
+      vendorName: 'GCP',
+      description: 'Hosting',
+      amountInr: 15000,
+    );
+    expect(container.read(agencyStoreProvider).netProfitInr, 85000);
+
+    // AI Profit & Drafts
+    expect(
+      notifier.generateAiAssistantResponse('What is our net profit & margin?'),
+      contains('Net Studio Profit'),
+    );
+    expect(
+      notifier.generateAiAssistantResponse('Draft a WhatsApp follow-up message.'),
+      contains('WhatsApp Follow-Up Draft'),
+    );
+
+    // Delete CRUD checks
+    notifier.deleteTask(taskId);
+    notifier.deleteProject(projectId);
+    notifier.deleteClient(clientId);
+    notifier.deleteLead(leadId);
+    expect(container.read(agencyStoreProvider).tasks, isEmpty);
+    expect(container.read(agencyStoreProvider).projects, isEmpty);
+    expect(container.read(agencyStoreProvider).clients, isEmpty);
+    expect(container.read(agencyStoreProvider).leads, isEmpty);
+  });
 }

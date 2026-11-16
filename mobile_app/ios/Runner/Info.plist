@@ -49,6 +49,12 @@
 	<string>Blue Hour HQ uses local network access to sync workspace and SQL studio records on your studio Wi-Fi.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Blue Hour HQ uses the microphone for Founder voice notes in Founders Direct Chat.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Blue Hour HQ uses Face ID / Touch ID to lock and protect agency workspace access.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Blue Hour HQ uses photo library access to share project screenshots and creatives in Founders Direct Chat.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Blue Hour HQ uses camera access to capture project photos for Founders Direct Chat.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

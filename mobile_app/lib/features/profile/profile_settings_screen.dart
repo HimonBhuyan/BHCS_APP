@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/services/biometric_auth_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/widgets/bh_widgets.dart';
 import '../../data/models/agency_models.dart';
@@ -545,6 +546,46 @@ class ProfileAndSettingsScreen extends ConsumerWidget {
                   ),
                   value: state.isOfflineMode,
                   onChanged: (_) => notifier.toggleOfflineSimulation(),
+                ),
+                const Divider(),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(
+                    Icons.fingerprint_rounded,
+                    color: AppColors.electricBlue,
+                  ),
+                  title: const Text('Biometric App Lock'),
+                  subtitle: const Text(
+                    'Require Fingerprint / Face ID when opening or resuming',
+                  ),
+                  value: state.biometricLockEnabled,
+                  onChanged: (nextVal) async {
+                    final ok =
+                        await BhBiometricAuthService.instance.authenticate(
+                      reason: nextVal
+                          ? 'Confirm biometrics to lock Blue Hour HQ'
+                          : 'Confirm biometrics to disable App Lock',
+                    );
+                    if (!context.mounted) return;
+                    if (ok) {
+                      notifier.toggleBiometricLock(nextVal);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            nextVal
+                                ? 'Biometric App Lock enabled.'
+                                : 'Biometric App Lock disabled.',
+                          ),
+                        ),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Biometric verification cancelled.'),
+                        ),
+                      );
+                    }
+                  },
                 ),
                 const Divider(),
                 SwitchListTile.adaptive(

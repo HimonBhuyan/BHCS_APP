@@ -242,6 +242,63 @@ if ($action === 'health') {
     exit;
 }
 
+if ($action === 'upload_media' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $raw = file_get_contents('php://input');
+    $data = json_decode($raw ?: '{}', true);
+    $b64 = is_array($data) ? (string) ($data['base64'] ?? '') : '';
+    $origName = is_array($data) ? (string) ($data['fileName'] ?? 'file.bin') : 'file.bin';
+    if ($b64 === '') {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'Missing base64 payload']);
+        exit;
+    }
+    $bytes = base64_decode($b64, true);
+    if ($bytes === false || strlen($bytes) > 15 * 1024 * 1024) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'Invalid or oversized upload (max 15MB)']);
+        exit;
+    }
+    $uploadDir = dirname(__DIR__) . '/uploads';
+    if (!is_dir($uploadDir)) {
+        @mkdir($uploadDir, 0775, true);
+    }
+    $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+    $safeExt = preg_replace('/[^a-z0-9]/', '', $ext) ?: 'bin';
+    $storedName = 'bh_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $safeExt;
+    file_put_contents($uploadDir . '/' . $storedName, $bytes);
+    echo json_encode([
+        'ok' => true,
+        'fileName' => $storedName,
+        'sizeBytes' => strlen($bytes),
+    ]);
+    exit;
+}
+
+if ($action === 'media') {
+    $file = basename((string) ($_GET['file'] ?? ''));
+    $path = dirname(__DIR__) . '/uploads/' . $file;
+    if ($file === '' || !is_file($path)) {
+        http_response_code(404);
+        echo json_encode(['ok' => false, 'error' => 'Media not found']);
+        exit;
+    }
+    $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+    $mime = match ($ext) {
+        'm4a', 'aac' => 'audio/mp4',
+        'mp3' => 'audio/mpeg',
+        'wav' => 'audio/wav',
+        'jpg', 'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'webp' => 'image/webp',
+        'pdf' => 'application/pdf',
+        default => 'application/octet-stream',
+    };
+    header("Content-Type: $mime");
+    header('Content-Length: ' . filesize($path));
+    readfile($path);
+    exit;
+}
+
 if ($action === 'send_push' || $action === 'test_push') {
     $raw = file_get_contents('php://input');
     $data = json_decode($raw ?: '{}', true);
@@ -690,6 +747,30 @@ if ($action === 'sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':activity' => $lastActivity,
                     ':tid' => (string) $threadId,
                 ]);
+            }
+        }
+
+        // Prune records deleted in app across synced modules
+        $pruneMap = [
+            'leads' => 'leads',
+            'followups' => 'lead_followups',
+            'clients' => 'clients',
+            'projects' => 'projects',
+            'tasks' => 'tasks',
+            'meetings' => 'meetings',
+            'proposals' => 'proposals',
+            'invoices' => 'invoices',
+            'expenses' => 'expenses',
+        ];
+        foreach ($pruneMap as $jsonKey => $tbl) {
+            if (!isset($payload[$jsonKey]) || !is_array($payload[$jsonKey])) continue;
+            $ids = array_values(array_filter(array_map(fn($r) => $r['id'] ?? null, $payload[$jsonKey])));
+            if (empty($ids)) {
+                $pdo->exec("DELETE FROM `$tbl`");
+            } else {
+                $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                $del = $pdo->prepare("DELETE FROM `$tbl` WHERE `id` NOT IN ($placeholders)");
+                $del->execute($ids);
             }
         }
 

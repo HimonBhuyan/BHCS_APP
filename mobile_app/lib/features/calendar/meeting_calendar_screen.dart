@@ -493,16 +493,134 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
                         Row(
                           children: [
                             TextButton(
-                              onPressed: () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      'Reschedule notification sent to ${mtg.participants.length} participants.',
+                              onPressed: () async {
+                                final tCtrl =
+                                    TextEditingController(text: mtg.title);
+                                final cCtrl = TextEditingController(
+                                    text: mtg.clientOrCompany);
+                                final lCtrl =
+                                    TextEditingController(text: mtg.location);
+                                final linkCtrl = TextEditingController(
+                                    text: mtg.onlineMeetingLink ?? '');
+                                final nCtrl =
+                                    TextEditingController(text: mtg.notes);
+                                await showModalBottomSheet<void>(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  builder: (ctx) => Padding(
+                                    padding: EdgeInsets.only(
+                                      left: 20,
+                                      right: 20,
+                                      top: 20,
+                                      bottom: MediaQuery.of(ctx)
+                                              .viewInsets
+                                              .bottom +
+                                          24,
+                                    ),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Edit Meeting',
+                                          style: Theme.of(ctx)
+                                              .textTheme
+                                              .headlineSmall,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        TextField(
+                                          controller: tCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Title *',
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        TextField(
+                                          controller: cCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Client / Topic',
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        TextField(
+                                          controller: linkCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Meeting Link',
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        TextField(
+                                          controller: nCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Notes',
+                                          ),
+                                        ),
+                                        const SizedBox(height: 14),
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: OutlinedButton(
+                                                style: OutlinedButton.styleFrom(
+                                                  foregroundColor:
+                                                      AppColors.error,
+                                                ),
+                                                onPressed: () {
+                                                  ref
+                                                      .read(agencyStoreProvider
+                                                          .notifier)
+                                                      .deleteMeeting(mtg.id);
+                                                  Navigator.pop(ctx);
+                                                },
+                                                child: const Text('Cancel Mtg'),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: FilledButton(
+                                                onPressed: () {
+                                                  if (tCtrl.text
+                                                      .trim()
+                                                      .isEmpty) {
+                                                    return;
+                                                  }
+                                                  ref
+                                                      .read(agencyStoreProvider
+                                                          .notifier)
+                                                      .updateMeeting(
+                                                        meetingId: mtg.id,
+                                                        title:
+                                                            tCtrl.text.trim(),
+                                                        clientOrCompany:
+                                                            cCtrl.text.trim(),
+                                                        meetingType:
+                                                            mtg.meetingType,
+                                                        location:
+                                                            lCtrl.text.trim(),
+                                                        onlineLink:
+                                                            linkCtrl.text.trim(),
+                                                        startTime: mtg.startTime
+                                                            .add(const Duration(
+                                                                hours: 1)),
+                                                        endTime: mtg.endTime
+                                                            .add(const Duration(
+                                                                hours: 1)),
+                                                        notes:
+                                                            nCtrl.text.trim(),
+                                                      );
+                                                  Navigator.pop(ctx);
+                                                },
+                                                child: const Text('Save +1hr'),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 );
                               },
-                              child: const Text('Reschedule'),
+                              child: const Text('Edit'),
                             ),
                             if (mtg.hasOnlineLink)
                               ElevatedButton.icon(

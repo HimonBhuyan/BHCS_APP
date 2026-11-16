@@ -343,6 +343,33 @@ class _FinanceAndProposalsScreenState
     );
   }
 
+  Widget _financeStatTile(String label, String value, Color color) {
+    return BhSurfaceCard(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.darkTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(agencyStoreProvider);
@@ -428,88 +455,48 @@ class _FinanceAndProposalsScreenState
             // Top Financial Summary Strip
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-              child: Row(
+              child: Column(
                 children: [
-                  Expanded(
-                    child: BhSurfaceCard(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Collected (INR)',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: AppColors.darkTextSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            BhFormatters.inrCompact(state.monthlyRevenueInr),
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.successSoft,
-                            ),
-                          ),
-                        ],
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _financeStatTile(
+                          'Collected (INR)',
+                          BhFormatters.inrCompact(state.monthlyRevenueInr),
+                          AppColors.successSoft,
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _financeStatTile(
+                          'Receivables',
+                          BhFormatters.inrCompact(state.outstandingPaymentsInr),
+                          AppColors.warning,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: BhSurfaceCard(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Receivables',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: AppColors.darkTextSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            BhFormatters.inrCompact(
-                                state.outstandingPaymentsInr),
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.warning,
-                            ),
-                          ),
-                        ],
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _financeStatTile(
+                          'Studio OpEx',
+                          BhFormatters.inrCompact(totalExpenses),
+                          AppColors.electricBlue,
+                        ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: BhSurfaceCard(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Studio OpEx',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: AppColors.darkTextSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            BhFormatters.inrCompact(totalExpenses),
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.electricBlue,
-                            ),
-                          ),
-                        ],
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _financeStatTile(
+                          'Net Profit',
+                          BhFormatters.inrCompact(state.netProfitInr),
+                          state.netProfitInr >= 0
+                              ? AppColors.successSoft
+                              : AppColors.error,
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ],
               ),
@@ -563,10 +550,26 @@ class _FinanceAndProposalsScreenState
                                           color: AppColors.electricBlue,
                                         ),
                                       ),
-                                      BhStatusPill(
-                                        label: inv.status,
-                                        color: statusColor,
-                                        compact: true,
+                                      Row(
+                                        children: [
+                                          BhStatusPill(
+                                            label: inv.status,
+                                            color: statusColor,
+                                            compact: true,
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Delete Invoice',
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                            onPressed: () =>
+                                                notifier.deleteInvoice(inv.id),
+                                            icon: const Icon(
+                                              Icons.delete_outline_rounded,
+                                              size: 18,
+                                              color: AppColors.error,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ],
                                   ),
@@ -664,12 +667,47 @@ class _FinanceAndProposalsScreenState
                                           color: AppColors.indigo,
                                         ),
                                       ),
-                                      BhStatusPill(
-                                        label: prop.status,
-                                        color: prop.status == 'Accepted'
-                                            ? AppColors.success
-                                            : AppColors.electricBlue,
-                                        compact: true,
+                                      PopupMenuButton<String>(
+                                        onSelected: (v) {
+                                          if (v == 'delete') {
+                                            notifier.deleteProposal(prop.id);
+                                          } else {
+                                            notifier.updateProposalStatus(
+                                              prop.id,
+                                              v,
+                                            );
+                                          }
+                                        },
+                                        itemBuilder: (_) => const [
+                                          PopupMenuItem(
+                                            value: 'Sent',
+                                            child: Text('Mark Sent'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'Accepted',
+                                            child: Text('Mark Accepted'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'Rejected',
+                                            child: Text('Mark Rejected'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'delete',
+                                            child: Text(
+                                              'Delete Proposal',
+                                              style: TextStyle(
+                                                color: AppColors.error,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                        child: BhStatusPill(
+                                          label: '${prop.status} ▾',
+                                          color: prop.status == 'Accepted'
+                                              ? AppColors.success
+                                              : AppColors.electricBlue,
+                                          compact: true,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -772,6 +810,16 @@ class _FinanceAndProposalsScreenState
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w800,
                                       color: AppColors.warning,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Delete Expense',
+                                    onPressed: () =>
+                                        notifier.deleteExpense(exp.id),
+                                    icon: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      size: 18,
+                                      color: AppColors.error,
                                     ),
                                   ),
                                 ],
@@ -1008,6 +1056,172 @@ class ClientsScreen extends ConsumerWidget {
                                 label: client.status,
                                 color: AppColors.successSoft,
                                 compact: true,
+                              ),
+                              PopupMenuButton<String>(
+                                tooltip: 'Client Actions',
+                                padding: EdgeInsets.zero,
+                                onSelected: (act) async {
+                                  final store =
+                                      ref.read(agencyStoreProvider.notifier);
+                                  if (act == 'edit') {
+                                    final compCtrl = TextEditingController(
+                                        text: client.companyName);
+                                    final cpCtrl = TextEditingController(
+                                        text: client.contactPerson);
+                                    final emCtrl = TextEditingController(
+                                        text: client.email);
+                                    final phCtrl = TextEditingController(
+                                        text: client.phone);
+                                    final nCtrl = TextEditingController(
+                                        text: client.notes);
+                                    var status = client.status;
+                                    await showModalBottomSheet<void>(
+                                      context: context,
+                                      isScrollControlled: true,
+                                      builder: (ctx) => StatefulBuilder(
+                                        builder: (ctx, setM) => Padding(
+                                          padding: EdgeInsets.only(
+                                            left: 20,
+                                            right: 20,
+                                            top: 20,
+                                            bottom: MediaQuery.of(ctx)
+                                                    .viewInsets
+                                                    .bottom +
+                                                24,
+                                          ),
+                                          child: SingleChildScrollView(
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  'Edit Client (${client.clientCode})',
+                                                  style: Theme.of(ctx)
+                                                      .textTheme
+                                                      .headlineSmall,
+                                                ),
+                                                const SizedBox(height: 12),
+                                                TextField(
+                                                  controller: compCtrl,
+                                                  decoration:
+                                                      const InputDecoration(
+                                                    labelText: 'Company Name *',
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 10),
+                                                TextField(
+                                                  controller: cpCtrl,
+                                                  decoration:
+                                                      const InputDecoration(
+                                                    labelText:
+                                                        'Contact Person *',
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 10),
+                                                TextField(
+                                                  controller: phCtrl,
+                                                  decoration:
+                                                      const InputDecoration(
+                                                    labelText: 'Phone',
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 10),
+                                                TextField(
+                                                  controller: emCtrl,
+                                                  decoration:
+                                                      const InputDecoration(
+                                                    labelText: 'Email',
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 10),
+                                                DropdownButtonFormField<String>(
+                                                  initialValue: status,
+                                                  decoration:
+                                                      const InputDecoration(
+                                                    labelText: 'Status',
+                                                  ),
+                                                  items: const [
+                                                    'Active',
+                                                    'Retainer',
+                                                    'On Hold',
+                                                  ]
+                                                      .map((s) =>
+                                                          DropdownMenuItem(
+                                                            value: s,
+                                                            child: Text(s),
+                                                          ))
+                                                      .toList(),
+                                                  onChanged: (v) {
+                                                    if (v != null) {
+                                                      setM(() => status = v);
+                                                    }
+                                                  },
+                                                ),
+                                                const SizedBox(height: 10),
+                                                TextField(
+                                                  controller: nCtrl,
+                                                  maxLines: 2,
+                                                  decoration:
+                                                      const InputDecoration(
+                                                    labelText: 'Notes',
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 14),
+                                                SizedBox(
+                                                  width: double.infinity,
+                                                  child: FilledButton(
+                                                    onPressed: () {
+                                                      if (compCtrl.text
+                                                          .trim()
+                                                          .isEmpty) {
+                                                        return;
+                                                      }
+                                                      store.updateClient(
+                                                        clientId: client.id,
+                                                        companyName: compCtrl
+                                                            .text
+                                                            .trim(),
+                                                        contactPerson: cpCtrl
+                                                            .text
+                                                            .trim(),
+                                                        email:
+                                                            emCtrl.text.trim(),
+                                                        phone:
+                                                            phCtrl.text.trim(),
+                                                        status: status,
+                                                        notes:
+                                                            nCtrl.text.trim(),
+                                                      );
+                                                      Navigator.pop(ctx);
+                                                    },
+                                                    child: const Text(
+                                                        'Save Client'),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  } else if (act == 'delete') {
+                                    store.deleteClient(client.id);
+                                  }
+                                },
+                                itemBuilder: (_) => const [
+                                  PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('Edit Client'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text(
+                                      'Delete Client',
+                                      style: TextStyle(color: AppColors.error),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),

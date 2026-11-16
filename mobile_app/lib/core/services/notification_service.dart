@@ -371,6 +371,50 @@ class BhNotificationService {
     }
   }
 
+  static const int _dailyBriefingNotifId = 880880;
+
+  /// Schedules or cancels the recurring automated daily Founder Briefing push.
+  Future<void> scheduleDailyFounderBriefing({
+    required bool enabled,
+    required int hour,
+    required int minute,
+    required String summaryBody,
+  }) async {
+    if (_isTestEnv) return;
+    await ensurePluginInitialized();
+    try {
+      await _localPlugin.cancel(_dailyBriefingNotifId);
+    } catch (_) {}
+    if (!enabled) return;
+
+    final now = tz.TZDateTime.now(tz.local);
+    var scheduled = tz.TZDateTime(
+      tz.local,
+      now.year,
+      now.month,
+      now.day,
+      hour.clamp(0, 23),
+      minute.clamp(0, 59),
+    );
+    if (scheduled.isBefore(now)) {
+      scheduled = scheduled.add(const Duration(days: 1));
+    }
+    try {
+      await _localPlugin.zonedSchedule(
+        _dailyBriefingNotifId,
+        'Blue Hour HQ • Morning Founder Digest',
+        summaryBody,
+        scheduled,
+        _detailsForCategory('Announcements'),
+        payload: '/home',
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.time,
+      );
+    } catch (_) {}
+  }
+
   void _handleNotificationTap(NotificationResponse response) {
     final route = response.payload;
     if (route != null && route.isNotEmpty) {

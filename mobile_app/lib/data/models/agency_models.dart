@@ -323,6 +323,41 @@ class ClientRecord {
     required this.onboardedAt,
     required this.notes,
   });
+
+  ClientRecord copyWith({
+    String? companyName,
+    String? contactPerson,
+    String? email,
+    String? phone,
+    String? address,
+    String? industry,
+    List<String>? servicesPurchased,
+    String? accountManager,
+    String? status,
+    double? totalBilledInr,
+    double? outstandingInr,
+    String? notes,
+  }) {
+    return ClientRecord(
+      id: id,
+      clientCode: clientCode,
+      companyName: companyName ?? this.companyName,
+      contactPerson: contactPerson ?? this.contactPerson,
+      email: email ?? this.email,
+      phone: phone ?? this.phone,
+      website: website,
+      address: address ?? this.address,
+      industry: industry ?? this.industry,
+      servicesPurchased: servicesPurchased ?? this.servicesPurchased,
+      accountManager: accountManager ?? this.accountManager,
+      status: status ?? this.status,
+      totalBilledInr: totalBilledInr ?? this.totalBilledInr,
+      outstandingInr: outstandingInr ?? this.outstandingInr,
+      activeProjectsCount: activeProjectsCount,
+      onboardedAt: onboardedAt,
+      notes: notes ?? this.notes,
+    );
+  }
 }
 
 class ChatMessage {
@@ -337,6 +372,7 @@ class ChatMessage {
   final String messageType; // 'text', 'voice', 'document', 'image', 'announcement'
   final String? attachmentName;
   final String? attachmentSize;
+  final String? attachmentUrl;
   final int? voiceDurationSec;
   final String? replyToSender;
   final String? replyToPreview;
@@ -356,6 +392,7 @@ class ChatMessage {
     this.messageType = 'text',
     this.attachmentName,
     this.attachmentSize,
+    this.attachmentUrl,
     this.voiceDurationSec,
     this.replyToSender,
     this.replyToPreview,
@@ -368,6 +405,7 @@ class ChatMessage {
     String? threadId,
     String? body,
     bool? isMe,
+    String? attachmentUrl,
     Map<String, int>? reactions,
     bool? isPinned,
   }) {
@@ -383,6 +421,7 @@ class ChatMessage {
       messageType: messageType,
       attachmentName: attachmentName,
       attachmentSize: attachmentSize,
+      attachmentUrl: attachmentUrl ?? this.attachmentUrl,
       voiceDurationSec: voiceDurationSec,
       replyToSender: replyToSender,
       replyToPreview: replyToPreview,
@@ -509,23 +548,27 @@ class TaskItem {
       status != 'Completed' && deadline.isBefore(DateTime.now());
 
   TaskItem copyWith({
+    String? title,
+    String? description,
+    String? priority,
     String? status,
     String? assignedEmployee,
+    DateTime? deadline,
     double? loggedHours,
     List<SubtaskItem>? subtasks,
   }) {
     return TaskItem(
       id: id,
       taskCode: taskCode,
-      title: title,
-      description: description,
+      title: title ?? this.title,
+      description: description ?? this.description,
       projectId: projectId,
       projectName: projectName,
       assignedEmployee: assignedEmployee ?? this.assignedEmployee,
-      priority: priority,
+      priority: priority ?? this.priority,
       status: status ?? this.status,
       startDate: startDate,
-      deadline: deadline,
+      deadline: deadline ?? this.deadline,
       loggedHours: loggedHours ?? this.loggedHours,
       estimatedHours: estimatedHours,
       subtasks: subtasks ?? this.subtasks,
@@ -594,6 +637,13 @@ class ProjectRecord {
   });
 
   ProjectRecord copyWith({
+    String? name,
+    String? clientName,
+    String? category,
+    String? description,
+    String? projectManager,
+    DateTime? deadline,
+    double? budgetInr,
     String? status,
     int? progressPercentage,
     List<String>? assignedTeam,
@@ -601,15 +651,15 @@ class ProjectRecord {
     return ProjectRecord(
       id: id,
       projectCode: projectCode,
-      name: name,
-      clientName: clientName,
-      category: category,
-      description: description,
-      projectManager: projectManager,
+      name: name ?? this.name,
+      clientName: clientName ?? this.clientName,
+      category: category ?? this.category,
+      description: description ?? this.description,
+      projectManager: projectManager ?? this.projectManager,
       assignedTeam: assignedTeam ?? this.assignedTeam,
       startDate: startDate,
-      deadline: deadline,
-      budgetInr: budgetInr,
+      deadline: deadline ?? this.deadline,
+      budgetInr: budgetInr ?? this.budgetInr,
       status: status ?? this.status,
       progressPercentage: progressPercentage ?? this.progressPercentage,
       milestones: milestones,
@@ -665,6 +715,11 @@ class MeetingRecord {
       onlineMeetingLink != null && onlineMeetingLink!.trim().isNotEmpty;
 
   MeetingRecord copyWith({
+    String? title,
+    String? clientOrCompany,
+    String? meetingType,
+    String? location,
+    String? onlineMeetingLink,
     String? status,
     DateTime? startTime,
     DateTime? endTime,
@@ -673,14 +728,14 @@ class MeetingRecord {
     return MeetingRecord(
       id: id,
       meetingCode: meetingCode,
-      title: title,
-      clientOrCompany: clientOrCompany,
-      description: description,
+      title: title ?? this.title,
+      clientOrCompany: clientOrCompany ?? this.clientOrCompany,
+      description: notes ?? description,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
-      meetingType: meetingType,
-      location: location,
-      onlineMeetingLink: onlineMeetingLink,
+      meetingType: meetingType ?? this.meetingType,
+      location: location ?? this.location,
+      onlineMeetingLink: onlineMeetingLink ?? this.onlineMeetingLink,
       participants: participants,
       assignedEmployee: assignedEmployee,
       status: status ?? this.status,

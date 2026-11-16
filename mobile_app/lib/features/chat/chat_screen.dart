@@ -1,6 +1,13 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/widgets/bh_widgets.dart';
@@ -320,12 +327,81 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   final ScrollController _scrollController = ScrollController();
   ChatMessage? _replyingTo;
   String? _playingVoiceMsgId;
+  bool _showMentionBar = false;
+  Timer? _typingDebounce;
+  AudioPlayer? _audioPlayer;
+  StreamSubscription<void>? _playerCompleteSub;
+
+  bool get _isTestEnv => Platform.environment.containsKey('FLUTTER_TEST');
 
   @override
   void dispose() {
+    _typingDebounce?.cancel();
+    _playerCompleteSub?.cancel();
+    _audioPlayer?.dispose();
     _msgController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onComposerChanged(String val) {
+    final notifier = ref.read(agencyStoreProvider.notifier);
+    notifier.setTypingStatus(widget.threadId, val.trim().isNotEmpty);
+    _typingDebounce?.cancel();
+    if (val.trim().isNotEmpty) {
+      _typingDebounce = Timer(
+        const Duration(seconds: 4),
+        () => notifier.setTypingStatus(widget.threadId, false),
+      );
+    }
+    final wantsMention = val.endsWith('@');
+    if (wantsMention != _showMentionBar) {
+      setState(() => _showMentionBar = wantsMention);
+    }
+  }
+
+  void _insertMention(AppUser founder) {
+    final current = _msgController.text;
+    final prefix = current.endsWith('@')
+        ? current.substring(0, current.length - 1)
+        : (current.isEmpty || current.endsWith(' ') ? current : '$current ');
+    final nextText = '$prefix@${founder.name} ';
+    _msgController.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: nextText.length),
+    );
+    setState(() => _showMentionBar = false);
+  }
+
+  Future<void> _togglePlayVoice(ChatMessage msg) async {
+    if (_playingVoiceMsgId == msg.id) {
+      try {
+        await _audioPlayer?.stop();
+      } catch (_) {}
+      if (mounted) setState(() => _playingVoiceMsgId = null);
+      return;
+    }
+
+    setState(() => _playingVoiceMsgId = msg.id);
+    if (_isTestEnv || msg.attachmentUrl == null || msg.attachmentUrl!.isEmpty) {
+      return;
+    }
+
+    try {
+      _audioPlayer ??= AudioPlayer();
+      _playerCompleteSub ??= _audioPlayer!.onPlayerComplete.listen((_) {
+        if (mounted) setState(() => _playingVoiceMsgId = null);
+      });
+      await _audioPlayer!.stop();
+      final url = msg.attachmentUrl!;
+      if (url.startsWith('http')) {
+        await _audioPlayer!.play(UrlSource(url));
+      } else if (File(url).existsSync()) {
+        await _audioPlayer!.play(DeviceFileSource(url));
+      }
+    } catch (_) {
+      if (mounted) setState(() => _playingVoiceMsgId = null);
+    }
   }
 
   void _scrollToBottom() {
@@ -344,6 +420,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     String type = 'text',
     String? customBody,
     String? attachmentName,
+    String? attachmentSize,
+    String? attachmentUrl,
     int? voiceSec,
   }) {
     final text = customBody ?? _msgController.text.trim();
@@ -354,6 +432,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
           body: text,
           messageType: type,
           attachmentName: attachmentName,
+          attachmentSize: attachmentSize,
+          attachmentUrl: attachmentUrl,
           voiceDurationSec: voiceSec,
           replyToSender: _replyingTo?.senderName,
           replyToPreview: _replyingTo?.body,
@@ -361,6 +441,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     setState(() {
       _msgController.clear();
       _replyingTo = null;
+      _showMentionBar = false;
     });
     _scrollToBottom();
   }
@@ -368,6 +449,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   void _showVoiceNoteSheet() {
     int selectedDurationSec = 12;
     final noteCtrl = TextEditingController(text: 'Founder Voice Memo');
+    final recorder = _isTestEnv ? null : AudioRecorder();
+    bool isRecording = false;
+    bool isUploading = false;
+    int recordedSec = 0;
+    Timer? recordTimer;
 
     showModalBottomSheet(
       context: context,
@@ -391,12 +477,17 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: AppColors.electricBlue.withValues(alpha: 0.16),
+                          color: (isRecording
+                                  ? AppColors.error
+                                  : AppColors.electricBlue)
+                              .withValues(alpha: 0.16),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(
-                          Icons.mic_rounded,
-                          color: AppColors.electricBlue,
+                        child: Icon(
+                          isRecording ? Icons.graphic_eq_rounded : Icons.mic_rounded,
+                          color: isRecording
+                              ? AppColors.error
+                              : AppColors.electricBlue,
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -405,11 +496,15 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Send Founder Voice Note',
+                              isRecording
+                                  ? 'Recording Live • 0:${recordedSec.toString().padLeft(2, '0')}'
+                                  : 'Founder Voice Note',
                               style: Theme.of(ctx).textTheme.headlineSmall,
                             ),
                             Text(
-                              'High-clarity Opus audio memo for the studio',
+                              isRecording
+                                  ? 'Tap Stop & Send to upload real audio'
+                                  : 'Record live microphone audio or send quick voice memo',
                               style: Theme.of(ctx).textTheme.bodySmall,
                             ),
                           ],
@@ -417,7 +512,103 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: isUploading || recorder == null
+                          ? null
+                          : () async {
+                              if (!isRecording) {
+                                final permitted = await recorder.hasPermission();
+                                if (!permitted) {
+                                  if (ctx.mounted) {
+                                    ScaffoldMessenger.of(ctx).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Microphone permission required to record audio.',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                  return;
+                                }
+                                final dir = await getTemporaryDirectory();
+                                final outPath =
+                                    '${dir.path}/bh_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+                                await recorder.start(
+                                  const RecordConfig(
+                                    encoder: AudioEncoder.aacLc,
+                                    bitRate: 128000,
+                                  ),
+                                  path: outPath,
+                                );
+                                recordedSec = 0;
+                                recordTimer?.cancel();
+                                recordTimer = Timer.periodic(
+                                  const Duration(seconds: 1),
+                                  (_) {
+                                    if (ctx.mounted) {
+                                      setModalState(() => recordedSec++);
+                                    }
+                                  },
+                                );
+                                setModalState(() => isRecording = true);
+                              } else {
+                                recordTimer?.cancel();
+                                setModalState(() {
+                                  isRecording = false;
+                                  isUploading = true;
+                                });
+                                final path = await recorder.stop();
+                                String? remoteUrl;
+                                String? sizeLabel;
+                                if (path != null && File(path).existsSync()) {
+                                  final uploaded = await ref
+                                      .read(agencyStoreProvider.notifier)
+                                      .uploadChatMedia(File(path));
+                                  remoteUrl = uploaded.url;
+                                  sizeLabel = uploaded.sizeLabel;
+                                }
+                                if (!ctx.mounted) return;
+                                _sendMessage(
+                                  type: 'voice',
+                                  customBody: noteCtrl.text.trim().isEmpty
+                                      ? 'Founder Voice Note'
+                                      : noteCtrl.text.trim(),
+                                  attachmentName: 'VoiceNote.m4a',
+                                  attachmentSize: sizeLabel,
+                                  attachmentUrl: remoteUrl,
+                                  voiceSec: recordedSec < 1 ? 1 : recordedSec,
+                                );
+                                Navigator.pop(ctx);
+                              }
+                            },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor:
+                            isRecording ? AppColors.error : AppColors.electricBlue,
+                        side: BorderSide(
+                          color: isRecording
+                              ? AppColors.error
+                              : AppColors.electricBlue,
+                        ),
+                      ),
+                      icon: Icon(
+                        isRecording
+                            ? Icons.stop_circle_rounded
+                            : Icons.fiber_manual_record_rounded,
+                        size: 18,
+                      ),
+                      label: Text(
+                        isUploading
+                            ? 'Uploading Audio...'
+                            : (isRecording
+                                ? 'Stop & Send Voice Recording'
+                                : 'Start Live Mic Recording'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   TextField(
                     controller: noteCtrl,
                     decoration: const InputDecoration(
@@ -430,7 +621,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text(
-                        'Audio Length:',
+                        'Quick Memo Duration:',
                         style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w700,
@@ -455,20 +646,22 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     onChanged: (v) =>
                         setModalState(() => selectedDurationSec = v.round()),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed: () {
-                        _sendMessage(
-                          type: 'voice',
-                          customBody: noteCtrl.text.trim().isEmpty
-                              ? 'Founder Voice Memo'
-                              : noteCtrl.text.trim(),
-                          voiceSec: selectedDurationSec,
-                        );
-                        Navigator.pop(ctx);
-                      },
+                      onPressed: isRecording || isUploading
+                          ? null
+                          : () {
+                              _sendMessage(
+                                type: 'voice',
+                                customBody: noteCtrl.text.trim().isEmpty
+                                    ? 'Founder Voice Memo'
+                                    : noteCtrl.text.trim(),
+                                voiceSec: selectedDurationSec,
+                              );
+                              Navigator.pop(ctx);
+                            },
                       icon: const Icon(Icons.send_rounded, size: 17),
                       label: const Text('Send Voice Note'),
                     ),
@@ -479,68 +672,149 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
           },
         );
       },
-    );
+    ).whenComplete(() {
+      recordTimer?.cancel();
+      recorder?.dispose();
+    });
   }
 
   void _showShareAttachmentSheet() {
     final fileNameCtrl = TextEditingController();
     final captionCtrl = TextEditingController();
+    bool isUploading = false;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 20,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Share Document or Link',
-                style: Theme.of(ctx).textTheme.headlineSmall,
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: fileNameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'File Name or Link *',
-                  prefixIcon: Icon(Icons.insert_drive_file_outlined),
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Share Photo, File or Link',
+                    style: Theme.of(ctx).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: isUploading
+                              ? null
+                              : () async {
+                                  final picked = await ImagePicker().pickImage(
+                                    source: ImageSource.gallery,
+                                    imageQuality: 82,
+                                  );
+                                  if (picked == null) return;
+                                  setModalState(() => isUploading = true);
+                                  final uploaded = await ref
+                                      .read(agencyStoreProvider.notifier)
+                                      .uploadChatMedia(File(picked.path));
+                                  if (!ctx.mounted) return;
+                                  _sendMessage(
+                                    type: 'image',
+                                    customBody: captionCtrl.text.trim().isEmpty
+                                        ? 'Shared photo: ${picked.name}'
+                                        : captionCtrl.text.trim(),
+                                    attachmentName: picked.name,
+                                    attachmentSize: uploaded.sizeLabel,
+                                    attachmentUrl: uploaded.url,
+                                  );
+                                  Navigator.pop(ctx);
+                                },
+                          icon: const Icon(Icons.photo_library_outlined, size: 18),
+                          label: const Text('Photo / Image'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: isUploading
+                              ? null
+                              : () async {
+                                  final files = await FilePicker.pickFiles();
+                                  if (files.isEmpty ||
+                                      files.first.path == null) {
+                                    return;
+                                  }
+                                  final picked = files.first;
+                                  setModalState(() => isUploading = true);
+                                  final uploaded = await ref
+                                      .read(agencyStoreProvider.notifier)
+                                      .uploadChatMedia(File(picked.path!));
+                                  if (!ctx.mounted) return;
+                                  _sendMessage(
+                                    type: 'document',
+                                    customBody: captionCtrl.text.trim().isEmpty
+                                        ? 'Shared file: ${picked.name}'
+                                        : captionCtrl.text.trim(),
+                                    attachmentName: picked.name,
+                                    attachmentSize: uploaded.sizeLabel,
+                                    attachmentUrl: uploaded.url,
+                                  );
+                                  Navigator.pop(ctx);
+                                },
+                          icon: const Icon(Icons.folder_open_rounded, size: 18),
+                          label: const Text('PDF / File'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (isUploading) ...[
+                    const SizedBox(height: 10),
+                    const LinearProgressIndicator(minHeight: 3),
+                  ],
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: fileNameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Or paste File Name / Link *',
+                      prefixIcon: Icon(Icons.insert_drive_file_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: captionCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Message / Note (Optional)',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: isUploading
+                          ? null
+                          : () {
+                              if (fileNameCtrl.text.trim().isEmpty) return;
+                              _sendMessage(
+                                type: 'document',
+                                customBody: captionCtrl.text.trim().isEmpty
+                                    ? 'Shared attachment'
+                                    : captionCtrl.text.trim(),
+                                attachmentName: fileNameCtrl.text.trim(),
+                              );
+                              Navigator.pop(ctx);
+                            },
+                      icon: const Icon(Icons.send_rounded, size: 17),
+                      label: const Text('Send Attachment'),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: captionCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Message / Note (Optional)',
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    if (fileNameCtrl.text.trim().isEmpty) return;
-                    _sendMessage(
-                      type: 'document',
-                      customBody: captionCtrl.text.trim().isEmpty
-                          ? 'Shared attachment'
-                          : captionCtrl.text.trim(),
-                      attachmentName: fileNameCtrl.text.trim(),
-                    );
-                    Navigator.pop(ctx);
-                  },
-                  icon: const Icon(Icons.send_rounded, size: 17),
-                  label: const Text('Send Attachment'),
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -955,13 +1229,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                     const SizedBox(height: 10),
                                     InkWell(
                                       borderRadius: BorderRadius.circular(12),
-                                      onTap: () {
-                                        setState(() {
-                                          _playingVoiceMsgId = isVoicePlaying
-                                              ? null
-                                              : msg.id;
-                                        });
-                                      },
+                                      onTap: () => _togglePlayVoice(msg),
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
                                           horizontal: 10,
@@ -993,7 +1261,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                             ),
                                             const SizedBox(width: 8),
                                             Text(
-                                              '0:${(msg.voiceDurationSec ?? 12).toString().padLeft(2, '0')}',
+                                              isVoicePlaying
+                                                  ? 'Playing 0:${(msg.voiceDurationSec ?? 12).toString().padLeft(2, '0')}'
+                                                  : '0:${(msg.voiceDurationSec ?? 12).toString().padLeft(2, '0')}',
                                               style: const TextStyle(
                                                 fontSize: 11.5,
                                                 fontWeight: FontWeight.w700,
@@ -1006,8 +1276,40 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                     ),
                                   ],
 
+                                  // Image Preview if photo attachment
+                                  if (msg.messageType == 'image' &&
+                                      msg.attachmentUrl != null &&
+                                      msg.attachmentUrl!.isNotEmpty) ...[
+                                    const SizedBox(height: 10),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                          maxHeight: 180,
+                                          maxWidth: 230,
+                                        ),
+                                        child: msg.attachmentUrl!
+                                                .startsWith('http')
+                                            ? Image.network(
+                                                msg.attachmentUrl!,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (_, _, _) =>
+                                                    const SizedBox.shrink(),
+                                              )
+                                            : (File(msg.attachmentUrl!)
+                                                    .existsSync()
+                                                ? Image.file(
+                                                    File(msg.attachmentUrl!),
+                                                    fit: BoxFit.cover,
+                                                  )
+                                                : const SizedBox.shrink()),
+                                      ),
+                                    ),
+                                  ],
+
                                   // Document Attachment Preview
-                                  if (msg.attachmentName != null) ...[
+                                  if (msg.attachmentName != null &&
+                                      msg.messageType != 'voice') ...[
                                     const SizedBox(height: 10),
                                     InkWell(
                                       borderRadius: BorderRadius.circular(12),
@@ -1016,7 +1318,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                             .showSnackBar(
                                           SnackBar(
                                             content: Text(
-                                              'Opening attachment: ${msg.attachmentName}',
+                                              '${msg.attachmentName} (${msg.attachmentSize ?? 'Attached'})',
                                             ),
                                           ),
                                         );
@@ -1032,15 +1334,20 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            const Icon(
-                                              Icons.insert_drive_file_rounded,
+                                            Icon(
+                                              msg.messageType == 'image'
+                                                  ? Icons.image_rounded
+                                                  : Icons
+                                                      .insert_drive_file_rounded,
                                               color: Colors.white,
                                               size: 20,
                                             ),
                                             const SizedBox(width: 8),
                                             Flexible(
                                               child: Text(
-                                                msg.attachmentName!,
+                                                msg.attachmentSize != null
+                                                    ? '${msg.attachmentName!} • ${msg.attachmentSize}'
+                                                    : msg.attachmentName!,
                                                 style: const TextStyle(
                                                   fontSize: 11.5,
                                                   fontWeight: FontWeight.w700,
@@ -1171,9 +1478,74 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                 ),
               ),
 
+            // Live Typing Indicator + @Mention Quick Bar
+            if (state.typingByThread[thread.id] != null)
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+                color: AppColors.electricBlue.withValues(alpha: 0.08),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.more_horiz_rounded,
+                      size: 16,
+                      color: AppColors.electricBlue,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${state.typingByThread[thread.id]} is typing...',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.electricBlue,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            if (_showMentionBar)
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                color: isDark
+                    ? AppColors.darkElevatedSurface
+                    : AppColors.lightElevatedSurface,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: state.employees
+                        .where((e) => e.id != state.currentUser.id)
+                        .map(
+                          (founder) => Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ActionChip(
+                              avatar: BhAvatar(
+                                name: founder.name,
+                                size: 22,
+                                isOnline: founder.isOnline,
+                              ),
+                              label: Text(
+                                '@${founder.name}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              onPressed: () => _insertMention(founder),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              ),
+
             // Message Composer Bar
             Container(
-              padding: const EdgeInsets.fromLTRB(8, 10, 10, 18),
+              padding: const EdgeInsets.fromLTRB(6, 10, 10, 18),
               decoration: BoxDecoration(
                 color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
                 border: Border(
@@ -1186,7 +1558,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    tooltip: 'Attach File or Link',
+                    tooltip: 'Attach Photo or File',
                     onPressed: _showShareAttachmentSheet,
                     icon: const Icon(Icons.attach_file_rounded, size: 21),
                   ),
@@ -1195,9 +1567,20 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     onPressed: _showVoiceNoteSheet,
                     icon: const Icon(Icons.mic_none_rounded, size: 21),
                   ),
+                  IconButton(
+                    tooltip: 'Mention Founder (@)',
+                    onPressed: () =>
+                        setState(() => _showMentionBar = !_showMentionBar),
+                    icon: Icon(
+                      Icons.alternate_email_rounded,
+                      size: 20,
+                      color: _showMentionBar ? AppColors.electricBlue : null,
+                    ),
+                  ),
                   Expanded(
                     child: TextField(
                       controller: _msgController,
+                      onChanged: _onComposerChanged,
                       textInputAction: TextInputAction.send,
                       onSubmitted: (_) => _sendMessage(),
                       decoration: InputDecoration(

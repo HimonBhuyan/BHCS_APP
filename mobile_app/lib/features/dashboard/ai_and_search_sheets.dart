@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
@@ -21,6 +22,9 @@ class _AiBusinessAssistantSheetState
   final List<(bool isUser, String text)> _conversation = [];
 
   static const _suggestedPrompts = [
+    "What is our net profit & margin?",
+    "Draft a client proposal pitch.",
+    "Draft a WhatsApp follow-up message.",
     "Show me all leads that haven't received a follow-up in seven days.",
     "Which employee converted the most leads this month?",
     "How many active website development projects do we have?",
@@ -179,17 +183,66 @@ class _AiBusinessAssistantSheetState
                                       : AppColors.lightBorder,
                                 ),
                         ),
-                        child: Text(
-                          item.$2,
-                          style: TextStyle(
-                            color: isUser
-                                ? Colors.white
-                                : (isDark
-                                    ? AppColors.darkTextPrimary
-                                    : AppColors.lightTextPrimary),
-                            fontSize: 13.5,
-                            height: 1.48,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.$2,
+                              style: TextStyle(
+                                color: isUser
+                                    ? Colors.white
+                                    : (isDark
+                                        ? AppColors.darkTextPrimary
+                                        : AppColors.lightTextPrimary),
+                                fontSize: 13.5,
+                                height: 1.48,
+                              ),
+                            ),
+                            if (!isUser) ...[
+                              const SizedBox(height: 6),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(8),
+                                  onTap: () {
+                                    Clipboard.setData(
+                                      ClipboardData(text: item.$2),
+                                    );
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Copied AI response'),
+                                      ),
+                                    );
+                                  },
+                                  child: const Padding(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.copy_rounded,
+                                          size: 13,
+                                          color: AppColors.electricBlue,
+                                        ),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          'Copy',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                            color: AppColors.electricBlue,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     );

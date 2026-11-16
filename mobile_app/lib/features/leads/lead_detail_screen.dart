@@ -407,6 +407,183 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen>
                 ),
               ),
             ),
+          PopupMenuButton<String>(
+            tooltip: 'Lead Actions',
+            onSelected: (action) async {
+              if (action == 'edit') {
+                final companyCtrl =
+                    TextEditingController(text: lead.companyName);
+                final contactCtrl =
+                    TextEditingController(text: lead.contactPerson);
+                final phoneCtrl = TextEditingController(text: lead.phone);
+                final emailCtrl = TextEditingController(text: lead.email);
+                final budgetCtrl = TextEditingController(
+                  text: lead.estimatedBudgetInr.round().toString(),
+                );
+                final notesCtrl = TextEditingController(text: lead.notes);
+                var priority = lead.priority;
+                await showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (ctx) => StatefulBuilder(
+                    builder: (ctx, setModalState) => Padding(
+                      padding: EdgeInsets.only(
+                        left: 20,
+                        right: 20,
+                        top: 20,
+                        bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+                      ),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Edit Lead (${lead.leadCode})',
+                              style: Theme.of(ctx).textTheme.headlineSmall,
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: companyCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Company Name *',
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: contactCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Contact Person *',
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: phoneCtrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Phone',
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: TextField(
+                                    controller: budgetCtrl,
+                                    keyboardType: TextInputType.number,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Budget (INR)',
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            DropdownButtonFormField<String>(
+                              initialValue: priority,
+                              decoration:
+                                  const InputDecoration(labelText: 'Priority'),
+                              items: const ['Low', 'Medium', 'High', 'Hot']
+                                  .map((p) =>
+                                      PopupMenuItem(value: p, child: Text(p)))
+                                  .map((item) => DropdownMenuItem<String>(
+                                        value: item.value,
+                                        child: item.child!,
+                                      ))
+                                  .toList(),
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setModalState(() => priority = v);
+                                }
+                              },
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: emailCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Email',
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: notesCtrl,
+                              maxLines: 2,
+                              decoration: const InputDecoration(
+                                labelText: 'Notes',
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton(
+                                onPressed: () {
+                                  if (companyCtrl.text.trim().isEmpty) return;
+                                  ref
+                                      .read(agencyStoreProvider.notifier)
+                                      .updateLead(
+                                        leadId: lead.id,
+                                        companyName: companyCtrl.text.trim(),
+                                        contactPerson: contactCtrl.text.trim(),
+                                        phone: phoneCtrl.text.trim(),
+                                        email: emailCtrl.text.trim(),
+                                        priority: priority,
+                                        budgetInr: double.tryParse(
+                                                budgetCtrl.text.trim()) ??
+                                            lead.estimatedBudgetInr,
+                                        notes: notesCtrl.text.trim(),
+                                      );
+                                  Navigator.pop(ctx);
+                                },
+                                child: const Text('Save Lead Changes'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              } else if (action == 'delete') {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Delete lead?'),
+                    content: Text(
+                      'Remove ${lead.companyName} (${lead.leadCode}) from CRM pipeline?',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel'),
+                      ),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.error,
+                        ),
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Delete'),
+                      ),
+                    ],
+                  ),
+                );
+                if (ok == true && context.mounted) {
+                  ref.read(agencyStoreProvider.notifier).deleteLead(lead.id);
+                  Navigator.pop(context);
+                }
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'edit', child: Text('Edit Lead')),
+              PopupMenuItem(
+                value: 'delete',
+                child: Text(
+                  'Delete Lead',
+                  style: TextStyle(color: AppColors.error),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
       body: Column(

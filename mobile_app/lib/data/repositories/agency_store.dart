@@ -14,6 +14,7 @@ import '../../core/utils/formatters.dart';
 class AgencyAppState {
   final bool isLoggedIn;
   final bool hasCompletedOnboarding;
+  final bool biometricLockEnabled;
   final ThemeMode themeMode;
   final bool isOfflineMode;
   final int pendingOfflineActions;
@@ -24,6 +25,7 @@ class AgencyAppState {
   final List<LeadFollowupItem> followups;
   final List<ClientRecord> clients;
   final List<ChatThread> chatThreads;
+  final Map<String, String> typingByThread;
   final List<ProjectRecord> projects;
   final List<TaskItem> tasks;
   final List<MeetingRecord> meetings;
@@ -36,6 +38,7 @@ class AgencyAppState {
   const AgencyAppState({
     this.isLoggedIn = false,
     this.hasCompletedOnboarding = false,
+    this.biometricLockEnabled = false,
     required this.themeMode,
     required this.isOfflineMode,
     required this.pendingOfflineActions,
@@ -46,6 +49,7 @@ class AgencyAppState {
     required this.followups,
     required this.clients,
     required this.chatThreads,
+    this.typingByThread = const {},
     required this.projects,
     required this.tasks,
     required this.meetings,
@@ -70,6 +74,17 @@ class AgencyAppState {
   double get outstandingPaymentsInr =>
       invoices.fold<double>(0, (acc, inv) => acc + inv.balanceDueInr);
 
+  double get monthlyExpensesInr =>
+      expenses.fold<double>(0, (acc, e) => acc + e.amountInr);
+
+  double get netProfitInr => monthlyRevenueInr - monthlyExpensesInr;
+
+  int get overdueInvoicesCount => invoices
+      .where((inv) =>
+          inv.balanceDueInr > 0 &&
+          (inv.status == 'Overdue' || inv.dueDate.isBefore(DateTime.now())))
+      .length;
+
   int get convertedLeadsCount =>
       leads.where((l) => l.status == 'Converted').length;
 
@@ -82,6 +97,7 @@ class AgencyAppState {
   AgencyAppState copyWith({
     bool? isLoggedIn,
     bool? hasCompletedOnboarding,
+    bool? biometricLockEnabled,
     ThemeMode? themeMode,
     bool? isOfflineMode,
     int? pendingOfflineActions,
@@ -92,6 +108,7 @@ class AgencyAppState {
     List<LeadFollowupItem>? followups,
     List<ClientRecord>? clients,
     List<ChatThread>? chatThreads,
+    Map<String, String>? typingByThread,
     List<ProjectRecord>? projects,
     List<TaskItem>? tasks,
     List<MeetingRecord>? meetings,
@@ -105,6 +122,7 @@ class AgencyAppState {
       isLoggedIn: isLoggedIn ?? this.isLoggedIn,
       hasCompletedOnboarding:
           hasCompletedOnboarding ?? this.hasCompletedOnboarding,
+      biometricLockEnabled: biometricLockEnabled ?? this.biometricLockEnabled,
       themeMode: themeMode ?? this.themeMode,
       isOfflineMode: isOfflineMode ?? this.isOfflineMode,
       pendingOfflineActions: pendingOfflineActions ?? this.pendingOfflineActions,
@@ -115,6 +133,7 @@ class AgencyAppState {
       followups: followups ?? this.followups,
       clients: clients ?? this.clients,
       chatThreads: chatThreads ?? this.chatThreads,
+      typingByThread: typingByThread ?? this.typingByThread,
       projects: projects ?? this.projects,
       tasks: tasks ?? this.tasks,
       meetings: meetings ?? this.meetings,
@@ -130,7 +149,10 @@ class AgencyAppState {
 class AgencyStoreNotifier extends Notifier<AgencyAppState> {
   @override
   AgencyAppState build() {
-    ref.onDispose(() => _firestoreSub?.cancel());
+    ref.onDispose(() {
+      _firestoreSub?.cancel();
+      _typingSub?.cancel();
+    });
     final now = DateTime.now();
 
     // Official 3 Founders of Blue Hour Creative Studios (The Blue Hour Studios)
@@ -271,9 +293,11 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
   static const _kOnboardingDone = 'bh_has_completed_onboarding';
   static const _kActiveFounderId = 'bh_active_founder_id';
   static const _kThemeIsDark = 'bh_theme_is_dark';
+  static const _kBiometricLock = 'bh_biometric_lock_enabled';
   static const _kWorkspaceJson = 'bh_workspace_json_v1';
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _firestoreSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _typingSub;
   String _lastSyncedJson = '';
 
   bool get _isFirebaseReady =>
@@ -468,6 +492,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
                     'messageType': m.messageType,
                     'attachmentName': m.attachmentName,
                     'attachmentSize': m.attachmentSize,
+                    'attachmentUrl': m.attachmentUrl,
                     'voiceDurationSec': m.voiceDurationSec,
                     'replyToSender': m.replyToSender,
                     'replyToPreview': m.replyToPreview,
@@ -487,6 +512,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       await prefs.setBool(_kOnboardingDone, s.hasCompletedOnboarding);
       await prefs.setString(_kActiveFounderId, s.currentUser.id);
       await prefs.setBool(_kThemeIsDark, s.themeMode == ThemeMode.dark);
+      await prefs.setBool(_kBiometricLock, s.biometricLockEnabled);
 
       final payload = _encodeWorkspacePayload(s);
       final encodedJson = jsonEncode(payload);
@@ -640,6 +666,110 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
         }
       }
     }, onError: (_) {});
+
+    _typingSub ??= FirebaseFirestore.instance
+        .collection('blue_hour_hq')
+        .doc('typing')
+        .snapshots()
+        .listen((snap) {
+      final data = snap.data();
+      if (data == null) return;
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final active = <String, String>{};
+      data.forEach((threadId, rawVal) {
+        if (rawVal is Map) {
+          final fid = rawVal['founderId']?.toString() ?? '';
+          final fname = rawVal['founderName']?.toString() ?? '';
+          final ts = (rawVal['updatedAtMs'] as num?)?.toInt() ?? 0;
+          final isTyping = rawVal['isTyping'] == true;
+          if (isTyping &&
+              fid.isNotEmpty &&
+              fid != state.currentUser.id &&
+              (nowMs - ts).abs() < 12000) {
+            active[threadId] = fname;
+          }
+        }
+      });
+      super.state = state.copyWith(typingByThread: active);
+    }, onError: (_) {});
+  }
+
+  /// Broadcasts real-time typing status for the active thread.
+  void setTypingStatus(String threadId, bool isTyping) {
+    if (!_isFirebaseReady) return;
+    unawaited(
+      FirebaseFirestore.instance.collection('blue_hour_hq').doc('typing').set(
+        {
+          threadId: {
+            'founderId': state.currentUser.id,
+            'founderName': state.currentUser.name,
+            'isTyping': isTyping,
+            'updatedAtMs': DateTime.now().millisecondsSinceEpoch,
+          },
+        },
+        SetOptions(merge: true),
+      ).catchError((_) {}),
+    );
+  }
+
+  /// Uploads a voice recording, image, or document to the studio server for sharing.
+  Future<({String? url, String? sizeLabel})> uploadChatMedia(File file) async {
+    try {
+      final bytes = await file.readAsBytes();
+      final sizeKb = bytes.length / 1024;
+      final sizeLabel = sizeKb >= 1024
+          ? '${(sizeKb / 1024).toStringAsFixed(1)} MB'
+          : '${sizeKb.clamp(1, 9999).round()} KB';
+      if (Platform.environment.containsKey('FLUTTER_TEST') ||
+          bytes.length > 14 * 1024 * 1024) {
+        return (url: file.path, sizeLabel: sizeLabel);
+      }
+
+      const uploadBases = <String>[
+        'http://127.0.0.1:8090',
+        'http://192.168.29.26:8090',
+        'http://192.168.1.133:8090',
+      ];
+      final fileName = file.uri.pathSegments.isNotEmpty
+          ? file.uri.pathSegments.last
+          : 'upload.bin';
+      final encodedBody = jsonEncode({
+        'fileName': fileName,
+        'base64': base64Encode(bytes),
+      });
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(milliseconds: 2500);
+      try {
+        for (final base in uploadBases) {
+          try {
+            final req = await client.postUrl(
+              Uri.parse('$base/index.php?action=upload_media'),
+            );
+            req.headers.contentType = ContentType.json;
+            req.write(encodedBody);
+            final resp = await req.close();
+            final raw = await resp.transform(utf8.decoder).join();
+            if (resp.statusCode == 200) {
+              final parsed = jsonDecode(raw) as Map<String, dynamic>;
+              final stored = parsed['fileName']?.toString();
+              if (stored != null && stored.isNotEmpty) {
+                return (
+                  url: '$base/index.php?action=media&file=$stored',
+                  sizeLabel: sizeLabel,
+                );
+              }
+            }
+          } catch (_) {
+            // Try next endpoint
+          }
+        }
+      } finally {
+        client.close(force: true);
+      }
+      return (url: file.path, sizeLabel: sizeLabel);
+    } catch (_) {
+      return (url: file.path, sizeLabel: null);
+    }
   }
 
   Future<String?> _pullFromLiveSqlBackend() async {
@@ -938,6 +1068,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
             messageType: m['messageType'] as String? ?? 'text',
             attachmentName: m['attachmentName'] as String?,
             attachmentSize: m['attachmentSize'] as String?,
+            attachmentUrl: m['attachmentUrl'] as String?,
             voiceDurationSec: (m['voiceDurationSec'] as num?)?.toInt(),
             replyToSender: m['replyToSender'] as String?,
             replyToPreview: m['replyToPreview'] as String?,
@@ -996,6 +1127,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       final activeFounderId =
           prefs.getString(_kActiveFounderId) ?? state.employees.first.id;
       final isDark = prefs.getBool(_kThemeIsDark) ?? true;
+      final biometricLock = prefs.getBool(_kBiometricLock) ?? false;
 
       final matchedFounder = state.employees.firstWhere(
         (e) => e.id == activeFounderId,
@@ -1005,6 +1137,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       var nextState = state.copyWith(
         isLoggedIn: isLoggedIn,
         hasCompletedOnboarding: onboardingDone,
+        biometricLockEnabled: biometricLock,
         currentUser: matchedFounder,
         themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
       );
@@ -1064,6 +1197,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
             matchedFounder.name,
           ),
         );
+        unawaited(_rescheduleDailyBriefing());
       }
       return nextState;
     } catch (_) {
@@ -1156,16 +1290,46 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     );
   }
 
+  Future<void> _rescheduleDailyBriefing() async {
+    final parts = state.currentUser.briefingTime.split(RegExp(r'[:\s]+'));
+    var hour = 9;
+    var minute = 0;
+    if (parts.length >= 2) {
+      hour = int.tryParse(parts[0]) ?? 9;
+      minute = int.tryParse(parts[1]) ?? 0;
+      if (parts.length >= 3 && parts[2].toUpperCase() == 'PM' && hour < 12) {
+        hour += 12;
+      } else if (parts.length >= 3 &&
+          parts[2].toUpperCase() == 'AM' &&
+          hour == 12) {
+        hour = 0;
+      }
+    }
+    final openTasks = state.tasks.where((t) => t.status != 'Completed').length;
+    await BhNotificationService.instance.scheduleDailyFounderBriefing(
+      enabled: state.notificationPrefs.dailyFounderBriefing,
+      hour: hour,
+      minute: minute,
+      summaryBody:
+          '${state.leads.length} CRM leads • $openTasks open tasks • ${state.meetings.length} meetings scheduled.',
+    );
+  }
+
   void updateBriefingTime(String newTime) {
     state = state.copyWith(
       currentUser: state.currentUser.copyWith(briefingTime: newTime),
     );
+    unawaited(_rescheduleDailyBriefing());
   }
 
   void toggleTwoFactor(bool enabled) {
     state = state.copyWith(
       currentUser: state.currentUser.copyWith(twoFactorEnabled: enabled),
     );
+  }
+
+  void toggleBiometricLock(bool enabled) {
+    state = state.copyWith(biometricLockEnabled: enabled);
   }
 
   AppNotification _buildNotification({
@@ -1576,6 +1740,8 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     required String body,
     String messageType = 'text',
     String? attachmentName,
+    String? attachmentSize,
+    String? attachmentUrl,
     int? voiceDurationSec,
     String? replyToSender,
     String? replyToPreview,
@@ -1599,7 +1765,9 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       isMe: true,
       messageType: messageType,
       attachmentName: attachmentName,
-      attachmentSize: attachmentName != null ? '2.1 MB' : null,
+      attachmentSize:
+          attachmentSize ?? (attachmentName != null ? 'Attached file' : null),
+      attachmentUrl: attachmentUrl,
       voiceDurationSec: voiceDurationSec,
       replyToSender: replyToSender,
       replyToPreview: replyToPreview,
@@ -1609,6 +1777,13 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       (t) => t.id == threadId,
       orElse: () => state.chatThreads.first,
     );
+
+    final lowerBody = body.toLowerCase();
+    final mentionedFounderIds = <String>[
+      if (lowerBody.contains('@himon')) 'emp-01',
+      if (lowerBody.contains('@darshana')) 'emp-02',
+      if (lowerBody.contains('@drishant')) 'emp-03',
+    ].where((id) => id != state.currentUser.id).toList();
 
     // If this is a 1-on-1 Founder DM, also sync the message into the sender's reciprocal DM thread
     // so when the recipient Founder switches profile and opens their DM with the sender, the message is there.
@@ -1641,12 +1816,15 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
 
     var nextNotifications = state.notifications;
     if (state.notificationPrefs.chatNotifications) {
+      final hasMention = mentionedFounderIds.isNotEmpty;
       final chatNotif = AppNotification(
         id: 'notif-msg-${now.microsecondsSinceEpoch}',
         category: 'Messages',
-        title: targetThread.isChannel
-            ? 'New Message in ${targetThread.name}'
-            : 'Direct Message to ${targetThread.name}',
+        title: hasMention
+            ? '🔔 Mentioned you in ${targetThread.name}'
+            : (targetThread.isChannel
+                ? 'New Message in ${targetThread.name}'
+                : 'Direct Message to ${targetThread.name}'),
         body: '${state.currentUser.name}: $previewLabel',
         timestamp: now,
         targetRoute: '/chat',
@@ -1662,6 +1840,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       pendingOfflineActions:
           state.isOfflineMode ? state.pendingOfflineActions + 1 : 0,
     );
+    setTypingStatus(threadId, false);
 
     if (state.notificationPrefs.chatNotifications && !state.isOfflineMode) {
       List<String>? dmRecipients;
@@ -1670,16 +1849,21 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
         if (threadId == 'dm-darshana') dmRecipients = const ['emp-02'];
         if (threadId == 'dm-drishant') dmRecipients = const ['emp-03'];
       }
+      final recipients = mentionedFounderIds.isNotEmpty
+          ? mentionedFounderIds
+          : dmRecipients;
       unawaited(
         BhNotificationService.instance.dispatchRemoteFcmPush(
-          title: targetThread.isChannel
-              ? 'Founders Board • ${state.currentUser.name}'
-              : 'Direct Message from ${state.currentUser.name}',
+          title: mentionedFounderIds.isNotEmpty
+              ? '🔔 ${state.currentUser.name} mentioned you in ${targetThread.name}'
+              : (targetThread.isChannel
+                  ? 'Founders Board • ${state.currentUser.name}'
+                  : 'Direct Message from ${state.currentUser.name}'),
           body: previewLabel,
           senderId: state.currentUser.id,
           category: 'Messages',
           targetRoute: '/chat',
-          targetFounderIds: dmRecipients,
+          targetFounderIds: recipients,
         ),
       );
     }
@@ -2075,6 +2259,207 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
 
   void updateNotificationPreferences(NotificationPreferencesState prefs) {
     state = state.copyWith(notificationPrefs: prefs);
+    unawaited(_rescheduleDailyBriefing());
+  }
+
+  // --- CRM, Projects, Tasks, Meetings & Finance Edit / Delete Power-Ups ---
+
+  void updateLead({
+    required String leadId,
+    required String companyName,
+    required String contactPerson,
+    required String phone,
+    required String email,
+    required String priority,
+    required double budgetInr,
+    required String notes,
+  }) {
+    final updated = state.leads.map((l) {
+      if (l.id != leadId) return l;
+      return l.copyWith(
+        companyName: companyName,
+        contactPerson: contactPerson,
+        phone: phone,
+        email: email,
+        priority: priority,
+        estimatedBudgetInr: budgetInr,
+        notes: notes,
+      );
+    }).toList();
+    state = state.copyWith(leads: updated);
+  }
+
+  void deleteLead(String leadId) {
+    state = state.copyWith(
+      leads: state.leads.where((l) => l.id != leadId).toList(),
+      followups: state.followups.where((f) => f.leadId != leadId).toList(),
+    );
+  }
+
+  void updateClient({
+    required String clientId,
+    required String companyName,
+    required String contactPerson,
+    required String email,
+    required String phone,
+    required String status,
+    required String notes,
+  }) {
+    final updated = state.clients.map((c) {
+      if (c.id != clientId) return c;
+      return c.copyWith(
+        companyName: companyName,
+        contactPerson: contactPerson,
+        email: email,
+        phone: phone,
+        status: status,
+        notes: notes,
+      );
+    }).toList();
+    state = state.copyWith(clients: updated);
+  }
+
+  void deleteClient(String clientId) {
+    state = state.copyWith(
+      clients: state.clients.where((c) => c.id != clientId).toList(),
+    );
+  }
+
+  void updateProject({
+    required String projectId,
+    required String name,
+    required String clientName,
+    required String description,
+    required String projectManager,
+    required double budgetInr,
+    required DateTime deadline,
+  }) {
+    final updated = state.projects.map((p) {
+      if (p.id != projectId) return p;
+      return p.copyWith(
+        name: name,
+        clientName: clientName,
+        description: description,
+        projectManager: projectManager,
+        budgetInr: budgetInr,
+        deadline: deadline,
+      );
+    }).toList();
+    state = state.copyWith(projects: updated);
+  }
+
+  void deleteProject(String projectId) {
+    state = state.copyWith(
+      projects: state.projects.where((p) => p.id != projectId).toList(),
+      tasks: state.tasks.where((t) => t.projectId != projectId).toList(),
+    );
+  }
+
+  void updateTask({
+    required String taskId,
+    required String title,
+    required String description,
+    required String assignedEmployee,
+    required String priority,
+    required DateTime deadline,
+  }) {
+    final updated = state.tasks.map((t) {
+      if (t.id != taskId) return t;
+      return t.copyWith(
+        title: title,
+        description: description,
+        assignedEmployee: assignedEmployee,
+        priority: priority,
+        deadline: deadline,
+      );
+    }).toList();
+    state = state.copyWith(tasks: updated);
+  }
+
+  void deleteTask(String taskId) {
+    state = state.copyWith(
+      tasks: state.tasks.where((t) => t.id != taskId).toList(),
+    );
+  }
+
+  void updateMeeting({
+    required String meetingId,
+    required String title,
+    required String clientOrCompany,
+    required String meetingType,
+    required String location,
+    String? onlineLink,
+    required DateTime startTime,
+    required DateTime endTime,
+    required String notes,
+  }) {
+    final updated = state.meetings.map((m) {
+      if (m.id != meetingId) return m;
+      return m.copyWith(
+        title: title,
+        clientOrCompany: clientOrCompany,
+        meetingType: meetingType,
+        location: location,
+        onlineMeetingLink: onlineLink,
+        startTime: startTime,
+        endTime: endTime,
+        notes: notes,
+        status: 'Rescheduled',
+      );
+    }).toList();
+    state = state.copyWith(meetings: updated);
+  }
+
+  void deleteMeeting(String meetingId) {
+    state = state.copyWith(
+      meetings: state.meetings.where((m) => m.id != meetingId).toList(),
+    );
+  }
+
+  void updateProposalStatus(String proposalId, String nextStatus) {
+    ProposalRecord? changed;
+    final updated = state.proposals.map((p) {
+      if (p.id != proposalId) return p;
+      changed = p.copyWith(status: nextStatus);
+      return changed!;
+    }).toList();
+    final notif = changed != null
+        ? _buildNotification(
+            category: 'Payments',
+            title: 'Proposal $nextStatus: ${changed!.title}',
+            body:
+                '${changed!.clientOrLeadName} • ${BhFormatters.inr(changed!.totalAmountInr)}',
+            targetRoute: '/finance',
+            entityId: proposalId,
+            actions: const ['Open Finance'],
+          )
+        : null;
+    state = state.copyWith(
+      proposals: updated,
+      notifications:
+          notif != null ? [notif, ...state.notifications] : state.notifications,
+    );
+    if (notif != null) {
+      _pushRemoteNotification(notif);
+    }
+  }
+
+  void deleteProposal(String proposalId) {
+    state = state.copyWith(
+      proposals: state.proposals.where((p) => p.id != proposalId).toList(),
+    );
+  }
+
+  void deleteInvoice(String invoiceId) {
+    state = state.copyWith(
+      invoices: state.invoices.where((i) => i.id != invoiceId).toList(),
+    );
+  }
+
+  void deleteExpense(String expenseId) {
+    state = state.copyWith(
+      expenses: state.expenses.where((e) => e.id != expenseId).toList(),
+    );
   }
 
   void createProposal({
@@ -2223,6 +2608,40 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     final q = query.toLowerCase();
     final now = DateTime.now();
 
+    if (q.contains('profit') || q.contains('margin') || q.contains('p&l')) {
+      final marginPct = state.monthlyRevenueInr <= 0
+          ? 0.0
+          : (state.netProfitInr / state.monthlyRevenueInr) * 100;
+      return '**Blue Hour Profit & Margin Breakdown (INR):**\n'
+          '• **Collected Revenue:** ${BhFormatters.inr(state.monthlyRevenueInr)}\n'
+          '• **Studio Operating Expenses:** ${BhFormatters.inr(state.monthlyExpensesInr)}\n'
+          '• **Net Studio Profit:** ${BhFormatters.inr(state.netProfitInr)} (${marginPct.toStringAsFixed(1)}% margin)\n'
+          '• **Receivables / Pending:** ${BhFormatters.inr(state.outstandingPaymentsInr)}';
+    }
+
+    if (q.contains('draft') && (q.contains('whatsapp') || q.contains('message'))) {
+      final targetLead = state.leads.isNotEmpty ? state.leads.first : null;
+      final name = targetLead?.contactPerson ?? 'there';
+      final company = targetLead?.companyName ?? 'your team';
+      final service = targetLead?.interestedService ?? 'Digital & Software Delivery';
+      return '**WhatsApp Follow-Up Draft (Ready to Copy):**\n\n'
+          'Hi $name 👋, hope your week is going well!\n'
+          'Following up from **Blue Hour Creative Studios** regarding $company\'s $service roadmap. '
+          'Himon, Darshana & Drishant put together milestone timelines and a tailored GST estimate — let us know a good time for a quick 15-min Google Meet!';
+    }
+
+    if (q.contains('draft') && q.contains('proposal')) {
+      final target = state.leads.isNotEmpty ? state.leads.first : null;
+      final company = target?.companyName ?? 'Client Partner';
+      final service = target?.interestedService ?? 'Full-Stack Web & Growth Suite';
+      final est = BhFormatters.inr(target?.estimatedBudgetInr ?? 120000);
+      return '**Executive Proposal Pitch Draft:**\n\n'
+          '**Prepared for:** $company\n'
+          '**Scope:** $service — Strategy, UI/UX Architecture, Production Build & QA\n'
+          '**Estimated Investment:** $est (+ 18% GST)\n'
+          '**Timeline:** 3–4 Weeks in tracked sprints with dedicated Founder supervision.';
+    }
+
     if (q.contains('seven days') ||
         q.contains('7 days') ||
         q.contains('follow-up') ||
@@ -2277,15 +2696,15 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
           .map((i) =>
               '• **${i.clientName}** (${i.invoiceNumber}) — Balance Due: **${BhFormatters.inr(i.balanceDueInr)}** (${i.status})')
           .join('\n');
-      return 'Total collected revenue is **${BhFormatters.inr(state.monthlyRevenueInr)}** with **${BhFormatters.inr(state.outstandingPaymentsInr)}** in pending payments:\n\n$lines';
+      return 'Total collected revenue is **${BhFormatters.inr(state.monthlyRevenueInr)}** with **${BhFormatters.inr(state.outstandingPaymentsInr)}** in pending payments (${state.overdueInvoicesCount} overdue):\n\n$lines';
     }
 
     return '**Blue Hour Creative Studios — Live Workspace Status:**\n'
         '• **Founders:** Himon Bhuyan (Software & AI), Darshana Das (Client Growth & Social), Drishant Das (Hardware & IoT)\n'
-        '• **CRM Pipeline:** ${state.leads.length} leads (${state.convertedLeadsCount} converted)\n'
-        '• **Active Projects:** ${state.projects.length} projects • ${state.tasks.length} tasks\n'
+        '• **CRM Pipeline:** ${state.leads.length} leads (${state.convertedLeadsCount} converted) • ${state.clients.length} clients\n'
+        '• **Active Projects:** ${state.projects.length} projects • ${state.tasks.length} to-do tasks\n'
         '• **Meetings Scheduled:** ${state.meetings.length}\n'
-        '• **Finance Ledger:** ${BhFormatters.inr(state.monthlyRevenueInr)} collected • ${BhFormatters.inr(state.outstandingPaymentsInr)} receivables.';
+        '• **Net Profit:** ${BhFormatters.inr(state.netProfitInr)} (Collected ${BhFormatters.inr(state.monthlyRevenueInr)} − OpEx ${BhFormatters.inr(state.monthlyExpensesInr)})';
   }
 }
 

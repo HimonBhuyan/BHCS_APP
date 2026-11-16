@@ -47,6 +47,12 @@ dependencies:
   firebase_messaging: ^15.2.5
   flutter_local_notifications: ^18.0.1
   timezone: ^0.10.0
+  local_auth: ^3.0.2
+  image_picker: ^1.2.3
+  file_picker: ^13.3.3
+  record: ^6.2.1
+  audioplayers: ^6.7.1
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:

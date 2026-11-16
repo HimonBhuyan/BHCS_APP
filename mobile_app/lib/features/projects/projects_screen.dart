@@ -496,18 +496,191 @@ class _ProjectsScreenState extends ConsumerState<ProjectsScreen> {
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(
-                                      '${project.projectCode} • ${project.category}',
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w800,
-                                        color: AppColors.electricBlue,
+                                    Expanded(
+                                      child: Text(
+                                        '${project.projectCode} • ${project.category}',
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppColors.electricBlue,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                     BhStatusPill(
                                       label: project.status,
                                       color: statusColor,
                                       compact: true,
+                                    ),
+                                    PopupMenuButton<String>(
+                                      tooltip: 'Project Actions',
+                                      padding: EdgeInsets.zero,
+                                      onSelected: (act) async {
+                                        final store = ref
+                                            .read(agencyStoreProvider.notifier);
+                                        if (act == 'edit') {
+                                          final nCtrl = TextEditingController(
+                                              text: project.name);
+                                          final cCtrl = TextEditingController(
+                                              text: project.clientName);
+                                          final dCtrl = TextEditingController(
+                                              text: project.description);
+                                          final bCtrl = TextEditingController(
+                                              text: project.budgetInr
+                                                  .round()
+                                                  .toString());
+                                          var mgr = project.projectManager;
+                                          await showModalBottomSheet<void>(
+                                            context: context,
+                                            isScrollControlled: true,
+                                            builder: (ctx) => StatefulBuilder(
+                                              builder: (ctx, setM) => Padding(
+                                                padding: EdgeInsets.only(
+                                                  left: 20,
+                                                  right: 20,
+                                                  top: 20,
+                                                  bottom: MediaQuery.of(ctx)
+                                                          .viewInsets
+                                                          .bottom +
+                                                      24,
+                                                ),
+                                                child: SingleChildScrollView(
+                                                  child: Column(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Text(
+                                                        'Edit Project (${project.projectCode})',
+                                                        style: Theme.of(ctx)
+                                                            .textTheme
+                                                            .headlineSmall,
+                                                      ),
+                                                      const SizedBox(height: 12),
+                                                      TextField(
+                                                        controller: nCtrl,
+                                                        decoration:
+                                                            const InputDecoration(
+                                                          labelText:
+                                                              'Project Name *',
+                                                        ),
+                                                      ),
+                                                      const SizedBox(height: 10),
+                                                      TextField(
+                                                        controller: cCtrl,
+                                                        decoration:
+                                                            const InputDecoration(
+                                                          labelText:
+                                                              'Client Name *',
+                                                        ),
+                                                      ),
+                                                      const SizedBox(height: 10),
+                                                      TextField(
+                                                        controller: bCtrl,
+                                                        keyboardType:
+                                                            TextInputType.number,
+                                                        decoration:
+                                                            const InputDecoration(
+                                                          labelText:
+                                                              'Budget (INR)',
+                                                        ),
+                                                      ),
+                                                      const SizedBox(height: 10),
+                                                      DropdownButtonFormField<
+                                                          String>(
+                                                        initialValue: mgr,
+                                                        decoration:
+                                                            const InputDecoration(
+                                                          labelText:
+                                                              'Project Lead',
+                                                        ),
+                                                        items: state.employees
+                                                            .map((e) =>
+                                                                DropdownMenuItem(
+                                                                  value: e.name,
+                                                                  child: Text(
+                                                                      e.name),
+                                                                ))
+                                                            .toList(),
+                                                        onChanged: (v) {
+                                                          if (v != null) {
+                                                            setM(() => mgr = v);
+                                                          }
+                                                        },
+                                                      ),
+                                                      const SizedBox(height: 10),
+                                                      TextField(
+                                                        controller: dCtrl,
+                                                        maxLines: 2,
+                                                        decoration:
+                                                            const InputDecoration(
+                                                          labelText:
+                                                              'Description',
+                                                        ),
+                                                      ),
+                                                      const SizedBox(height: 14),
+                                                      SizedBox(
+                                                        width: double.infinity,
+                                                        child: FilledButton(
+                                                          onPressed: () {
+                                                            if (nCtrl.text
+                                                                .trim()
+                                                                .isEmpty) {
+                                                              return;
+                                                            }
+                                                            store.updateProject(
+                                                              projectId:
+                                                                  project.id,
+                                                              name: nCtrl.text
+                                                                  .trim(),
+                                                              clientName: cCtrl
+                                                                  .text
+                                                                  .trim(),
+                                                              description: dCtrl
+                                                                  .text
+                                                                  .trim(),
+                                                              projectManager:
+                                                                  mgr,
+                                                              budgetInr: double.tryParse(
+                                                                      bCtrl.text
+                                                                          .trim()) ??
+                                                                  project
+                                                                      .budgetInr,
+                                                              deadline: project
+                                                                  .deadline,
+                                                            );
+                                                            Navigator.pop(ctx);
+                                                          },
+                                                          child: const Text(
+                                                              'Save Project'),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        } else if (act == 'delete') {
+                                          store.deleteProject(project.id);
+                                        }
+                                      },
+                                      itemBuilder: (_) => const [
+                                        PopupMenuItem(
+                                          value: 'edit',
+                                          child: Text('Edit Project'),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'delete',
+                                          child: Text(
+                                            'Delete Project',
+                                            style: TextStyle(
+                                                color: AppColors.error),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
@@ -844,9 +1017,193 @@ class _TasksBoardScreenState extends ConsumerState<TasksBoardScreen> {
                                         color: AppColors.electricBlue,
                                       ),
                                     ),
-                                    BhStatusPill.fromPriority(
-                                      task.priority,
-                                      compact: true,
+                                    Row(
+                                      children: [
+                                        BhStatusPill.fromPriority(
+                                          task.priority,
+                                          compact: true,
+                                        ),
+                                        PopupMenuButton<String>(
+                                          tooltip: 'Task Actions',
+                                          padding: EdgeInsets.zero,
+                                          onSelected: (act) async {
+                                            final store = ref.read(
+                                                agencyStoreProvider.notifier);
+                                            if (act == 'edit') {
+                                              final tCtrl =
+                                                  TextEditingController(
+                                                      text: task.title);
+                                              final dCtrl =
+                                                  TextEditingController(
+                                                      text: task.description);
+                                              var assignee =
+                                                  task.assignedEmployee;
+                                              var prio = task.priority;
+                                              await showModalBottomSheet<void>(
+                                                context: context,
+                                                isScrollControlled: true,
+                                                builder: (ctx) =>
+                                                    StatefulBuilder(
+                                                  builder: (ctx, setM) =>
+                                                      Padding(
+                                                    padding: EdgeInsets.only(
+                                                      left: 20,
+                                                      right: 20,
+                                                      top: 20,
+                                                      bottom: MediaQuery.of(ctx)
+                                                              .viewInsets
+                                                              .bottom +
+                                                          24,
+                                                    ),
+                                                    child: Column(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Text(
+                                                          'Edit To-Do (${task.taskCode})',
+                                                          style: Theme.of(ctx)
+                                                              .textTheme
+                                                              .headlineSmall,
+                                                        ),
+                                                        const SizedBox(
+                                                            height: 12),
+                                                        TextField(
+                                                          controller: tCtrl,
+                                                          decoration:
+                                                              const InputDecoration(
+                                                            labelText:
+                                                                'Task Title *',
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                            height: 10),
+                                                        DropdownButtonFormField<
+                                                            String>(
+                                                          initialValue:
+                                                              assignee,
+                                                          decoration:
+                                                              const InputDecoration(
+                                                            labelText:
+                                                                'Assigned Founder',
+                                                          ),
+                                                          items: state.employees
+                                                              .map((e) =>
+                                                                  DropdownMenuItem(
+                                                                    value:
+                                                                        e.name,
+                                                                    child: Text(
+                                                                        e.name),
+                                                                  ))
+                                                              .toList(),
+                                                          onChanged: (v) {
+                                                            if (v != null) {
+                                                              setM(() =>
+                                                                  assignee = v);
+                                                            }
+                                                          },
+                                                        ),
+                                                        const SizedBox(
+                                                            height: 10),
+                                                        DropdownButtonFormField<
+                                                            String>(
+                                                          initialValue: prio,
+                                                          decoration:
+                                                              const InputDecoration(
+                                                            labelText:
+                                                                'Priority',
+                                                          ),
+                                                          items: const [
+                                                            'Low',
+                                                            'Medium',
+                                                            'High',
+                                                            'Critical',
+                                                          ]
+                                                              .map((p) =>
+                                                                  DropdownMenuItem(
+                                                                    value: p,
+                                                                    child:
+                                                                        Text(p),
+                                                                  ))
+                                                              .toList(),
+                                                          onChanged: (v) {
+                                                            if (v != null) {
+                                                              setM(() =>
+                                                                  prio = v);
+                                                            }
+                                                          },
+                                                        ),
+                                                        const SizedBox(
+                                                            height: 10),
+                                                        TextField(
+                                                          controller: dCtrl,
+                                                          maxLines: 2,
+                                                          decoration:
+                                                              const InputDecoration(
+                                                            labelText:
+                                                                'Description',
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                            height: 14),
+                                                        SizedBox(
+                                                          width:
+                                                              double.infinity,
+                                                          child: FilledButton(
+                                                            onPressed: () {
+                                                              if (tCtrl.text
+                                                                  .trim()
+                                                                  .isEmpty) {
+                                                                return;
+                                                              }
+                                                              store.updateTask(
+                                                                taskId: task.id,
+                                                                title: tCtrl
+                                                                    .text
+                                                                    .trim(),
+                                                                description:
+                                                                    dCtrl.text
+                                                                        .trim(),
+                                                                assignedEmployee:
+                                                                    assignee,
+                                                                priority: prio,
+                                                                deadline: task
+                                                                    .deadline,
+                                                              );
+                                                              Navigator.pop(
+                                                                  ctx);
+                                                            },
+                                                            child: const Text(
+                                                                'Save To-Do'),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
+                                            } else if (act == 'delete') {
+                                              store.deleteTask(task.id);
+                                            }
+                                          },
+                                          itemBuilder: (_) => const [
+                                            PopupMenuItem(
+                                              value: 'edit',
+                                              child: Text('Edit Task'),
+                                            ),
+                                            PopupMenuItem(
+                                              value: 'delete',
+                                              child: Text(
+                                                'Delete Task',
+                                                style: TextStyle(
+                                                    color: AppColors.error),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),

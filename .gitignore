@@ -18,4 +18,5 @@ dataconnect-debug.log
 Thumbs.db
 backend/api/firebase-service-account*.json
 **/*service-account*.json
+backend/uploads/
 
