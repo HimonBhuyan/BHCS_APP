@@ -7,6 +7,7 @@ import 'package:blue_hour_hq/core/theme/app_theme.dart';
 import 'package:blue_hour_hq/data/models/agency_models.dart';
 import 'package:blue_hour_hq/data/repositories/agency_store.dart';
 import 'package:blue_hour_hq/features/chat/chat_screen.dart';
+import 'package:blue_hour_hq/features/calendar/meeting_calendar_screen.dart';
 import 'package:blue_hour_hq/features/notifications/notification_centre_screen.dart';
 
 void main() {
@@ -503,10 +504,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(container.read(agencyStoreProvider).notifications.length, 2);
 
-    // Clear all remaining notifications
-    notifier.clearNotifications();
+    // Tap the visible "Clear all" button & confirm dialog
+    await tester.tap(find.text('Clear all'));
+    await tester.pumpAndSettle();
+    expect(find.text('Clear notifications?'), findsOneWidget);
+    await tester.tap(find.text('Clear'));
     await tester.pumpAndSettle();
     expect(container.read(agencyStoreProvider).notifications, isEmpty);
     expect(find.text('Zero unread studio alerts'), findsOneWidget);
+
+    // Verify Meetings & Studio Calendar always shows Back button
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.darkTheme,
+          home: const MeetingCalendarScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Back'), findsOneWidget);
   });
 }

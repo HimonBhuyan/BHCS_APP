@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/widgets/bh_widgets.dart';
@@ -243,10 +244,20 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
       return true;
     }).toList();
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Meetings & Studio Calendar'),
-        actions: [
+    final canPop = GoRouter.maybeOf(context)?.canPop() ?? true;
+
+    return PopScope(
+      canPop: canPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          context.go('/home');
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: const BhSmartBackButton(),
+          title: const Text('Meetings & Studio Calendar'),
+          actions: [
           IconButton(
             tooltip: 'Toggle Month / Week View',
             onPressed: () => setState(() => _showMonthGrid = !_showMonthGrid),
@@ -529,6 +540,7 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

@@ -287,6 +287,7 @@ class _NotificationCentreScreenState
 
     return Scaffold(
       appBar: AppBar(
+        leading: const BhSmartBackButton(),
         titleSpacing: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -296,7 +297,7 @@ class _NotificationCentreScreenState
               overflow: TextOverflow.ellipsis,
             ),
             Text(
-              '${state.unreadNotificationCount} unread • Swipe to remove',
+              '${state.unreadNotificationCount} unread alerts',
               style: textTheme.labelSmall,
               overflow: TextOverflow.ellipsis,
             ),
@@ -313,12 +314,6 @@ class _NotificationCentreScreenState
               tooltip: 'Mark all read',
               onPressed: notifier.markAllNotificationsRead,
               icon: const Icon(Icons.done_all_rounded),
-            ),
-          if (filtered.isNotEmpty)
-            IconButton(
-              tooltip: 'Clear all notifications',
-              onPressed: () => _confirmClearAll(notifier),
-              icon: const Icon(Icons.delete_sweep_outlined),
             ),
           IconButton(
             tooltip: 'Notification Preferences',
@@ -354,7 +349,46 @@ class _NotificationCentreScreenState
               },
             ),
           ),
-          const SizedBox(height: 8),
+          if (filtered.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 12, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${filtered.length} alert${filtered.length == 1 ? '' : 's'} • Swipe any card to remove',
+                      style: textTheme.labelSmall,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => _confirmClearAll(notifier),
+                    icon: const Icon(
+                      Icons.clear_all_rounded,
+                      size: 16,
+                      color: AppColors.error,
+                    ),
+                    label: const Text(
+                      'Clear all',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.error,
+                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            const SizedBox(height: 8),
 
           Expanded(
             child: filtered.isEmpty

@@ -399,6 +399,7 @@ class _FinanceAndProposalsScreenState
 
     return Scaffold(
       appBar: AppBar(
+        leading: const BhSmartBackButton(),
         title: const Text('Finance, Invoices & Proposals (INR)'),
         bottom: TabBar(
           controller: _tabController,
@@ -934,6 +935,7 @@ class ClientsScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
+        leading: const BhSmartBackButton(),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

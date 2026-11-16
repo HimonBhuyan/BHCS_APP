@@ -366,7 +366,18 @@ class BhNotificationService {
 
   void _navigateToRoute(String route) {
     try {
-      appRouter.go(route);
+      const shellTabs = <String>{
+        '/home',
+        '/leads',
+        '/chat',
+        '/projects',
+        '/profile',
+      };
+      if (shellTabs.contains(route)) {
+        appRouter.go(route);
+      } else {
+        appRouter.push(route);
+      }
     } catch (_) {}
   }
 

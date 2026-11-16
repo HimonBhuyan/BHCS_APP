@@ -767,6 +767,7 @@ class _TasksBoardScreenState extends ConsumerState<TasksBoardScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: const BhSmartBackButton(),
         title: const Text('Dedicated Task Management'),
       ),
       floatingActionButton: FloatingActionButton.extended(

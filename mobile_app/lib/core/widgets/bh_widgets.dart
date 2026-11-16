@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import '../theme/app_colors.dart';
 
 /// Official Blue Hour Creative Studios Logo Emblem Widget
@@ -901,6 +902,37 @@ class BhSectionHeader extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Always-available Back button for secondary screens (falls back to [fallbackRoute]
+/// when opened directly from an OS push notification or cold deep link).
+class BhSmartBackButton extends StatelessWidget {
+  final String fallbackRoute;
+
+  const BhSmartBackButton({
+    super.key,
+    this.fallbackRoute = '/home',
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: 'Back',
+      icon: const BackButtonIcon(),
+      onPressed: () {
+        final router = GoRouter.maybeOf(context);
+        if (router != null) {
+          if (router.canPop()) {
+            router.pop();
+          } else {
+            router.go(fallbackRoute);
+          }
+          return;
+        }
+        Navigator.maybePop(context);
+      },
     );
   }
 }
