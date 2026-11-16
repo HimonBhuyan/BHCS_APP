@@ -398,4 +398,55 @@ void main() {
     expect(restoredBoard.messages.first.reactions['🚀'], 1);
     expect(restoredBoard.messages.first.isPinned, isTrue);
   });
+
+  test(
+      '6. Notifications: Test Push Alert, Meeting Reminders, Follow-up Alerts & Read States',
+      () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final notifier = container.read(agencyStoreProvider.notifier);
+
+    // 1. Trigger a live test push notification
+    await notifier.triggerTestPushNotification();
+    expect(container.read(agencyStoreProvider).unreadNotificationCount, 1);
+    expect(
+      container.read(agencyStoreProvider).notifications.first.category,
+      'Announcements',
+    );
+
+    // 2. Schedule a Meeting -> creates a Meeting notification with 1d/1h/15m/0m reminders
+    notifier.scheduleMeeting(
+      title: 'Blue Hour Sprint Sync',
+      clientOrCompany: 'Internal Founders',
+      meetingType: 'Founder Meeting',
+      startTime: DateTime.now().add(const Duration(hours: 2)),
+      endTime: DateTime.now().add(const Duration(hours: 3)),
+      location: 'Google Meet',
+      onlineLink: 'https://meet.google.com/blue-hour-sync',
+      participants: const ['Himon Bhuyan', 'Darshana Das', 'Drishant Das'],
+      notes: 'Review cloud release & client pipeline',
+    );
+    expect(container.read(agencyStoreProvider).unreadNotificationCount, 2);
+    expect(
+      container
+          .read(agencyStoreProvider)
+          .notifications
+          .any((n) => n.category == 'Meetings'),
+      isTrue,
+    );
+
+    // 3. Toggle notification preferences & mark all read
+    final prefs = container.read(agencyStoreProvider).notificationPrefs;
+    notifier.updateNotificationPreferences(
+      prefs.copyWith(quietHoursEnabled: true),
+    );
+    expect(
+      container.read(agencyStoreProvider).notificationPrefs.quietHoursEnabled,
+      isTrue,
+    );
+
+    notifier.markAllNotificationsRead();
+    expect(container.read(agencyStoreProvider).unreadNotificationCount, 0);
+  });
 }

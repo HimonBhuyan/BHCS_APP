@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/agency_models.dart';
+import '../../core/services/notification_service.dart';
 import '../../core/utils/formatters.dart';
 
 @immutable
@@ -565,6 +566,26 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     }
   }
 
+  bool _shouldSurfaceNotification(String category) {
+    final prefs = state.notificationPrefs;
+    switch (category) {
+      case 'Leads':
+        return prefs.leadReminders;
+      case 'Meetings':
+        return prefs.meetingReminders;
+      case 'Tasks':
+        return prefs.taskReminders;
+      case 'Projects':
+        return prefs.projectNotifications;
+      case 'Messages':
+        return prefs.chatNotifications;
+      case 'Payments':
+        return prefs.paymentNotifications;
+      default:
+        return true;
+    }
+  }
+
   void _startRealtimeFirestoreListener() {
     if (!_isFirebaseReady || _firestoreSub != null) return;
     _firestoreSub = FirebaseFirestore.instance
@@ -578,6 +599,9 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       final encodedRemote = jsonEncode(remotePayload);
       if (encodedRemote == _lastSyncedJson) return;
 
+      final updatedBy = data['updatedBy']?.toString();
+      final existingIds = state.notifications.map((n) => n.id).toSet();
+
       _lastSyncedJson = encodedRemote;
       final nextState = _applyWorkspaceMap(
         state,
@@ -590,6 +614,26 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
           (p) => p.setString(_kWorkspaceJson, encodedRemote),
         ),
       );
+
+      // Fire smooth OS notification banners for incoming notifications from Co-Founders
+      if (updatedBy != state.currentUser.id) {
+        final incoming = nextState.notifications
+            .where((n) => !n.isRead && !existingIds.contains(n.id))
+            .take(3);
+        for (final notif in incoming) {
+          if (_shouldSurfaceNotification(notif.category)) {
+            unawaited(
+              BhNotificationService.instance.showLocalNotification(
+                id: notif.id.hashCode & 0x7FFFFFFF,
+                title: notif.title,
+                body: notif.body,
+                category: notif.category,
+                targetRoute: notif.targetRoute ?? '/notifications',
+              ),
+            );
+          }
+        }
+      }
     }, onError: (_) {});
   }
 
@@ -975,6 +1019,14 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       }
 
       super.state = nextState;
+      if (isLoggedIn) {
+        unawaited(
+          BhNotificationService.instance.syncFounderDeviceToken(
+            matchedFounder.id,
+            matchedFounder.name,
+          ),
+        );
+      }
       return nextState;
     } catch (_) {
       return state;
@@ -1008,6 +1060,12 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       currentUser: matched,
       chatThreads:
           _recomputeThreadsForFounder(state.chatThreads, matched.id),
+    );
+    unawaited(
+      BhNotificationService.instance.syncFounderDeviceToken(
+        matched.id,
+        matched.name,
+      ),
     );
   }
 
@@ -1307,6 +1365,18 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       leads: updatedLeads,
       notifications: [newNotif, ...state.notifications],
     );
+    if (state.notificationPrefs.leadReminders) {
+      unawaited(
+        BhNotificationService.instance.scheduleReminderSequence(
+          entityId: fu.id,
+          title: 'Follow-up: $companyName',
+          subtitle: '$followupType • $notes',
+          targetTime: scheduledAt,
+          category: 'Leads',
+          targetRoute: '/leads/$leadId',
+        ),
+      );
+    }
   }
 
   void toggleFollowupCompleted(String followupId) {
@@ -1626,6 +1696,42 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     state = state.copyWith(
       meetings: [mtg, ...state.meetings],
       notifications: [notif, ...state.notifications],
+    );
+    if (state.notificationPrefs.meetingReminders) {
+      unawaited(
+        BhNotificationService.instance.scheduleReminderSequence(
+          entityId: mtg.id,
+          title: 'Meeting: $title',
+          subtitle: '$clientOrCompany • $location',
+          targetTime: startTime,
+          category: 'Meetings',
+          targetRoute: '/calendar',
+        ),
+      );
+    }
+  }
+
+  Future<void> triggerTestPushNotification() async {
+    final now = DateTime.now();
+    final testNotif = AppNotification(
+      id: 'notif-test-${now.microsecondsSinceEpoch}',
+      category: 'Announcements',
+      title: 'Blue Hour HQ • Live Push Active',
+      body:
+          'System notifications, scheduled reminders, and real-time Founders chat alerts are working smoothly.',
+      timestamp: now,
+      targetRoute: '/notifications',
+      actions: const ['View Centre'],
+    );
+    state = state.copyWith(
+      notifications: [testNotif, ...state.notifications],
+    );
+    await BhNotificationService.instance.showLocalNotification(
+      id: now.millisecondsSinceEpoch & 0x7FFFFFFF,
+      title: testNotif.title,
+      body: testNotif.body,
+      category: 'Announcements',
+      targetRoute: '/notifications',
     );
   }
 

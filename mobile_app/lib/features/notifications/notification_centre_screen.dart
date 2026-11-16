@@ -131,6 +131,19 @@ class _NotificationCentreScreenState
                         prefs.copyWith(quietHoursEnabled: v),
                       ),
                     ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          notifier.triggerTestPushNotification();
+                        },
+                        icon: const Icon(Icons.notifications_active_rounded,
+                            size: 18),
+                        label: const Text('Send Test OS Notification Banner'),
+                      ),
+                    ),
                   ],
                 );
               },
@@ -207,6 +220,11 @@ class _NotificationCentreScreenState
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Send Test Push Notification',
+            onPressed: notifier.triggerTestPushNotification,
+            icon: const Icon(Icons.notification_add_outlined),
+          ),
           TextButton(
             onPressed: notifier.markAllNotificationsRead,
             child: const Text(

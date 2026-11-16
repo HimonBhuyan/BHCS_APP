@@ -49,5 +49,10 @@
 	<string>Blue Hour HQ uses local network access to sync workspace and SQL studio records on your studio Wi-Fi.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Blue Hour HQ uses the microphone for Founder voice notes in Founders Direct Chat.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>
