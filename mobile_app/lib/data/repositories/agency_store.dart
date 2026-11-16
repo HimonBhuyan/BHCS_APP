@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/agency_models.dart';
 import '../../core/services/notification_service.dart';
+import '../../core/services/server_config.dart';
 import '../../core/utils/formatters.dart';
 
 @immutable
@@ -152,6 +153,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     ref.onDispose(() {
       _firestoreSub?.cancel();
       _typingSub?.cancel();
+      _configSub?.cancel();
     });
     final now = DateTime.now();
 
@@ -298,6 +300,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _firestoreSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _typingSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _configSub;
   String _lastSyncedJson = '';
 
   bool get _isFirebaseReady =>
@@ -526,14 +529,8 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     }
   }
 
-  static const _kSqlEndpoints = <String>[
-    'http://127.0.0.1:8090/index.php?action=sync',
-    'http://192.168.29.26:8090/index.php?action=sync',
-    'http://192.168.1.133:8090/index.php?action=sync',
-  ];
-
   /// Pushes all live workspace records & chat messages to both Firebase Cloud
-  /// Firestore (`krypt-6a44c` -> `blue_hour_hq/workspace`) and XAMPP MySQL (`blue_hour_hq`).
+  /// Firestore (`krypt-6a44c` -> `blue_hour_hq/workspace`) and Live MySQL (`blue_hour_hq`).
   Future<void> _pushToLiveBackends(
     Map<String, dynamic> payload,
     String encodedJson,
@@ -557,11 +554,11 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       }
     }
 
-    // 2. Live XAMPP MySQL (`blue_hour_hq`) sync
+    // 2. Live Cloud Railway / XAMPP MySQL (`blue_hour_hq`) sync
     final client = HttpClient()
-      ..connectionTimeout = const Duration(milliseconds: 1500);
+      ..connectionTimeout = const Duration(milliseconds: 2200);
     try {
-      for (final url in _kSqlEndpoints) {
+      for (final url in BhServerConfig.instance.actionUrls('sync')) {
         try {
           final req = await client.postUrl(Uri.parse(url));
           req.headers.contentType = ContentType.json;
@@ -692,6 +689,17 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       });
       super.state = state.copyWith(typingByThread: active);
     }, onError: (_) {});
+
+    _configSub ??= FirebaseFirestore.instance
+        .collection('blue_hour_hq')
+        .doc('config')
+        .snapshots()
+        .listen((snap) {
+      final url = snap.data()?['apiBaseUrl']?.toString();
+      if (url != null) {
+        unawaited(BhServerConfig.instance.setLiveBaseUrl(url));
+      }
+    }, onError: (_) {});
   }
 
   /// Broadcasts real-time typing status for the active thread.
@@ -725,11 +733,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
         return (url: file.path, sizeLabel: sizeLabel);
       }
 
-      const uploadBases = <String>[
-        'http://127.0.0.1:8090',
-        'http://192.168.29.26:8090',
-        'http://192.168.1.133:8090',
-      ];
+      final uploadBases = BhServerConfig.instance.baseUrls;
       final fileName = file.uri.pathSegments.isNotEmpty
           ? file.uri.pathSegments.last
           : 'upload.bin';
@@ -773,13 +777,9 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
   }
 
   Future<String?> _pullFromLiveSqlBackend() async {
-    const pullUrls = <String>[
-      'http://127.0.0.1:8090/index.php?action=pull',
-      'http://192.168.29.26:8090/index.php?action=pull',
-      'http://192.168.1.133:8090/index.php?action=pull',
-    ];
+    final pullUrls = BhServerConfig.instance.actionUrls('pull');
     final client = HttpClient()
-      ..connectionTimeout = const Duration(milliseconds: 1200);
+      ..connectionTimeout = const Duration(milliseconds: 1800);
     try {
       for (final url in pullUrls) {
         try {
@@ -1122,6 +1122,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
   Future<AgencyAppState> hydrateFromStorage() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      await BhServerConfig.instance.loadFromPrefs(prefs);
       final isLoggedIn = prefs.getBool(_kIsLoggedIn) ?? false;
       final onboardingDone = prefs.getBool(_kOnboardingDone) ?? false;
       final activeFounderId =
@@ -2462,7 +2463,33 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     );
   }
 
-  /// Wipes all demo/test records across CRM, Projects, Tasks, Meetings, Finance,
+  Future<({bool ok, String message})> saveAndTestLiveServerUrl(String url) async {
+    await BhServerConfig.instance.setLiveBaseUrl(url);
+    final normalized = BhServerConfig.instance.liveBaseUrl ?? '';
+    if (_isFirebaseReady) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('blue_hour_hq')
+            .doc('config')
+            .set({
+          'apiBaseUrl': normalized,
+          'updatedBy': state.currentUser.id,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } catch (_) {}
+    }
+    if (normalized.isEmpty) {
+      return (ok: true, message: 'Cleared cloud URL; using local studio Wi-Fi fallback.');
+    }
+    final res = await BhServerConfig.instance.testHealth(normalized);
+    if (res.ok && !Platform.environment.containsKey('FLUTTER_TEST')) {
+      // Immediately push current workspace to the newly connected cloud MySQL server
+      unawaited(_saveToPrefs());
+    }
+    return res;
+  }
+
+  /// Clears all demo/test records across CRM, Projects, Tasks, Meetings, Finance,
   /// Notifications & Chat while keeping the 3 Founders and 4 thread rooms intact.
   void resetWorkspaceToClean() {
     if (!state.currentUser.isSuperAdmin) return;

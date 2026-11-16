@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/services/biometric_auth_service.dart';
+import '../../core/services/server_config.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/widgets/bh_widgets.dart';
 import '../../data/models/agency_models.dart';
@@ -444,6 +445,106 @@ class ProfileAndSettingsScreen extends ConsumerWidget {
                     },
                   ),
                   const SizedBox(height: 12),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(
+                      Icons.cloud_done_rounded,
+                      color: AppColors.electricBlue,
+                    ),
+                    title: const Text('Live Cloud Server URL (Railway)'),
+                    subtitle: Text(
+                      BhServerConfig.instance.liveBaseUrl ??
+                          'Local Studio Wi-Fi (192.168.29.26:8090)',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: TextButton(
+                      onPressed: () async {
+                        final urlCtrl = TextEditingController(
+                          text: BhServerConfig.instance.liveBaseUrl ?? '',
+                        );
+                        String? statusMsg;
+                        bool? statusOk;
+                        bool testing = false;
+                        await showDialog<void>(
+                          context: context,
+                          builder: (ctx) => StatefulBuilder(
+                            builder: (ctx, setD) => AlertDialog(
+                              title: const Text('Cloud API Server (Railway)'),
+                              content: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Paste your Railway *.up.railway.app URL. It syncs to all 3 Founders automatically via Firestore.',
+                                    style: TextStyle(fontSize: 12.5),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  TextField(
+                                    controller: urlCtrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'HTTPS Base URL',
+                                      hintText:
+                                          'https://blue-hour-api.up.railway.app',
+                                    ),
+                                  ),
+                                  if (statusMsg != null) ...[
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      statusMsg!,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        color: statusOk == true
+                                            ? AppColors.successSoft
+                                            : AppColors.error,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: testing
+                                      ? null
+                                      : () => Navigator.pop(ctx),
+                                  child: const Text('Close'),
+                                ),
+                                FilledButton(
+                                  onPressed: testing
+                                      ? null
+                                      : () async {
+                                          setD(() => testing = true);
+                                          final res = await notifier
+                                              .saveAndTestLiveServerUrl(
+                                            urlCtrl.text,
+                                          );
+                                          if (ctx.mounted) {
+                                            setD(() {
+                                              testing = false;
+                                              statusOk = res.ok;
+                                              statusMsg = res.message;
+                                            });
+                                          }
+                                        },
+                                  child: Text(
+                                    testing ? 'Testing...' : 'Save & Test',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                        if (context.mounted && statusMsg != null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(statusMsg!)),
+                          );
+                        }
+                      },
+                      child: const Text('Configure'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(

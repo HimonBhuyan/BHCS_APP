@@ -9,6 +9,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 import '../router/app_router.dart';
+import 'server_config.dart';
 
 /// Top-level background FCM handler required by Firebase Messaging.
 @pragma('vm:entry-point')
@@ -451,13 +452,9 @@ class BhNotificationService {
     bool includeAllFounders = false,
   }) async {
     if (_isTestEnv) return;
-    const pushEndpoints = <String>[
-      'http://127.0.0.1:8090/index.php?action=send_push',
-      'http://192.168.29.26:8090/index.php?action=send_push',
-      'http://192.168.1.133:8090/index.php?action=send_push',
-    ];
+    final pushEndpoints = BhServerConfig.instance.actionUrls('send_push');
     final client = HttpClient()
-      ..connectionTimeout = const Duration(milliseconds: 1500);
+      ..connectionTimeout = const Duration(milliseconds: 2000);
     try {
       final encoded = jsonEncode({
         'title': title,

@@ -1,0 +1,4 @@
+<FilesMatch "\.(json|sql|env|log)$">
+  Require all denied
+</FilesMatch>
+DirectoryIndex index.php
