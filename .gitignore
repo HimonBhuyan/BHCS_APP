@@ -16,3 +16,6 @@ dataconnect-debug.log
 *.log
 .DS_Store
 Thumbs.db
+backend/api/firebase-service-account*.json
+**/*service-account*.json
+

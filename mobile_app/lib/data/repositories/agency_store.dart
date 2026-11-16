@@ -1197,6 +1197,15 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       pendingOfflineActions:
           state.isOfflineMode ? state.pendingOfflineActions + 1 : 0,
     );
+    unawaited(
+      BhNotificationService.instance.dispatchRemoteFcmPush(
+        title: newNotif.title,
+        body: newNotif.body,
+        senderId: state.currentUser.id,
+        category: 'Leads',
+        targetRoute: newNotif.targetRoute ?? '/leads',
+      ),
+    );
   }
 
   void updateLeadStatus(String leadId, String newStatus, {String? lostReason}) {
@@ -1491,6 +1500,27 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       pendingOfflineActions:
           state.isOfflineMode ? state.pendingOfflineActions + 1 : 0,
     );
+
+    if (state.notificationPrefs.chatNotifications && !state.isOfflineMode) {
+      List<String>? dmRecipients;
+      if (!targetThread.isChannel) {
+        if (threadId == 'dm-himon') dmRecipients = const ['emp-01'];
+        if (threadId == 'dm-darshana') dmRecipients = const ['emp-02'];
+        if (threadId == 'dm-drishant') dmRecipients = const ['emp-03'];
+      }
+      unawaited(
+        BhNotificationService.instance.dispatchRemoteFcmPush(
+          title: targetThread.isChannel
+              ? 'Founders Board • ${state.currentUser.name}'
+              : 'Direct Message from ${state.currentUser.name}',
+          body: previewLabel,
+          senderId: state.currentUser.id,
+          category: 'Messages',
+          targetRoute: '/chat',
+          targetFounderIds: dmRecipients,
+        ),
+      );
+    }
   }
 
   void markThreadRead(String threadId) {
@@ -1708,6 +1738,15 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
           targetRoute: '/calendar',
         ),
       );
+      unawaited(
+        BhNotificationService.instance.dispatchRemoteFcmPush(
+          title: notif.title,
+          body: notif.body,
+          senderId: state.currentUser.id,
+          category: 'Meetings',
+          targetRoute: '/calendar',
+        ),
+      );
     }
   }
 
@@ -1732,6 +1771,16 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       body: testNotif.body,
       category: 'Announcements',
       targetRoute: '/notifications',
+    );
+    unawaited(
+      BhNotificationService.instance.dispatchRemoteFcmPush(
+        title: testNotif.title,
+        body: testNotif.body,
+        senderId: state.currentUser.id,
+        category: 'Announcements',
+        targetRoute: '/notifications',
+        includeAllFounders: true,
+      ),
     );
   }
 

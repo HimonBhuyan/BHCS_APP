@@ -51,6 +51,176 @@ function toIso8601(?string $mysqlDt): ?string {
     return date('Y-m-d\TH:i:s.000', $ts);
 }
 
+function base64UrlEncode(string $data): string {
+    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+}
+
+function getFcmAccessToken(?string &$errorOut = null): ?array {
+    $saPath = __DIR__ . '/firebase-service-account.json';
+    if (!file_exists($saPath)) {
+        $errorOut = 'Missing firebase-service-account.json';
+        return null;
+    }
+    $sa = json_decode((string) file_get_contents($saPath), true);
+    if (!is_array($sa) || empty($sa['private_key']) || empty($sa['client_email']) || empty($sa['project_id'])) {
+        $errorOut = 'Invalid service account JSON';
+        return null;
+    }
+
+    $cachePath = sys_get_temp_dir() . '/bh_fcm_oauth_cache.json';
+    if (file_exists($cachePath)) {
+        $cached = json_decode((string) file_get_contents($cachePath), true);
+        if (is_array($cached) && !empty($cached['access_token']) && ($cached['expires_at'] ?? 0) > time() + 60) {
+            return ['token' => $cached['access_token'], 'project_id' => $sa['project_id']];
+        }
+    }
+
+    $now = time();
+    $header = base64UrlEncode((string) json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
+    $claims = base64UrlEncode((string) json_encode([
+        'iss' => $sa['client_email'],
+        'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
+        'aud' => $sa['token_uri'] ?? 'https://oauth2.googleapis.com/token',
+        'iat' => $now,
+        'exp' => $now + 3600,
+    ]));
+
+    $signingInput = $header . '.' . $claims;
+    $signature = '';
+    if (!openssl_sign($signingInput, $signature, $sa['private_key'], OPENSSL_ALGO_SHA256)) {
+        $errorOut = 'OpenSSL signing failed';
+        return null;
+    }
+    $jwt = $signingInput . '.' . base64UrlEncode($signature);
+
+    $ch = curl_init($sa['token_uri'] ?? 'https://oauth2.googleapis.com/token');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => http_build_query([
+            'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            'assertion' => $jwt,
+        ]),
+        CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
+        CURLOPT_TIMEOUT => 10,
+    ]);
+    $rawResp = curl_exec($ch);
+    $curlErr = curl_error($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($rawResp === false || $status !== 200) {
+        // Fallback retry if local Windows PHP lacks CA bundle path
+        $ch2 = curl_init($sa['token_uri'] ?? 'https://oauth2.googleapis.com/token');
+        curl_setopt_array($ch2, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => http_build_query([
+                'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                'assertion' => $jwt,
+            ]),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_TIMEOUT => 10,
+        ]);
+        $rawResp = curl_exec($ch2);
+        $curlErr = curl_error($ch2);
+        $status = (int) curl_getinfo($ch2, CURLINFO_HTTP_CODE);
+        curl_close($ch2);
+    }
+
+    $decoded = json_decode((string) $rawResp, true);
+    if (!is_array($decoded) || empty($decoded['access_token'])) {
+        $errorOut = "OAuth failed ($status): " . ($curlErr ?: (string) $rawResp);
+        return null;
+    }
+
+    @file_put_contents($cachePath, json_encode([
+        'access_token' => $decoded['access_token'],
+        'expires_at' => $now + (int) ($decoded['expires_in'] ?? 3500),
+    ]));
+
+    return ['token' => $decoded['access_token'], 'project_id' => $sa['project_id']];
+}
+
+function sendFcmPushToTopic(string $topic, string $title, string $body, string $category = 'Messages', string $targetRoute = '/chat'): array {
+    $err = null;
+    $auth = getFcmAccessToken($err);
+    if ($auth === null) {
+        return ['ok' => false, 'topic' => $topic, 'error' => $err];
+    }
+
+    $channelId = match ($category) {
+        'Messages' => 'blue_hour_hq_messages',
+        'Meetings' => 'blue_hour_hq_meetings',
+        'Leads' => 'blue_hour_hq_leads',
+        default => 'blue_hour_hq_high',
+    };
+
+    $messagePayload = [
+        'message' => [
+            'topic' => $topic,
+            'notification' => [
+                'title' => $title,
+                'body' => $body,
+            ],
+            'data' => [
+                'title' => $title,
+                'body' => $body,
+                'category' => $category,
+                'targetRoute' => $targetRoute,
+                'click_action' => 'FLUTTER_NOTIFICATION_CLICK',
+            ],
+            'android' => [
+                'priority' => 'HIGH',
+                'notification' => [
+                    'channel_id' => $channelId,
+                    'sound' => 'default',
+                    'default_sound' => true,
+                    'default_vibrate_timings' => true,
+                ],
+            ],
+            'apns' => [
+                'headers' => [
+                    'apns-priority' => '10',
+                ],
+                'payload' => [
+                    'aps' => [
+                        'sound' => 'default',
+                        'content-available' => 1,
+                    ],
+                ],
+            ],
+        ],
+    ];
+
+    $url = "https://fcm.googleapis.com/v1/projects/{$auth['project_id']}/messages:send";
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode($messagePayload),
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . $auth['token'],
+            'Content-Type: application/json',
+        ],
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_TIMEOUT => 10,
+    ]);
+    $raw = curl_exec($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr = curl_error($ch);
+    curl_close($ch);
+
+    return [
+        'ok' => $status >= 200 && $status < 300,
+        'status' => $status,
+        'topic' => $topic,
+        'response' => json_decode((string) $raw, true) ?: (string) $raw,
+        'curl_error' => $curlErr ?: null,
+    ];
+}
+
 $action = $_GET['action'] ?? ($_SERVER['REQUEST_METHOD'] === 'POST' ? 'sync' : 'pull');
 
 if ($action === 'health') {
@@ -62,8 +232,47 @@ if ($action === 'health') {
         'ok' => true,
         'database' => 'blue_hour_hq',
         'engine' => 'MySQL/MariaDB (XAMPP Live)',
+        'fcm_configured' => file_exists(__DIR__ . '/firebase-service-account.json'),
         'counts' => $counts,
         'timestamp' => date('c'),
+    ]);
+    exit;
+}
+
+if ($action === 'send_push' || $action === 'test_push') {
+    $raw = file_get_contents('php://input');
+    $data = json_decode($raw ?: '{}', true);
+    if (!is_array($data)) {
+        $data = [];
+    }
+    $title = (string) ($data['title'] ?? 'Blue Hour HQ • Live FCM Push');
+    $body = (string) ($data['body'] ?? 'Terminated & background push notifications are now active for all 3 Founders.');
+    $category = (string) ($data['category'] ?? 'Announcements');
+    $targetRoute = (string) ($data['targetRoute'] ?? '/notifications');
+    $senderId = (string) ($data['senderId'] ?? '');
+
+    $topics = [];
+    if ($action === 'test_push' || !empty($data['includeAllFounders'])) {
+        $topics[] = 'blue_hour_hq_founders';
+    } elseif (!empty($data['targetFounderIds']) && is_array($data['targetFounderIds'])) {
+        foreach ($data['targetFounderIds'] as $fid) {
+            $topics[] = 'blue_hour_' . preg_replace('/[^a-zA-Z0-9_-]/', '', (string) $fid);
+        }
+    } else {
+        foreach (['emp-01', 'emp-02', 'emp-03'] as $fid) {
+            if ($fid !== $senderId) {
+                $topics[] = 'blue_hour_' . $fid;
+            }
+        }
+    }
+
+    $results = [];
+    foreach ($topics as $t) {
+        $results[] = sendFcmPushToTopic($t, $title, $body, $category, $targetRoute);
+    }
+    echo json_encode([
+        'ok' => true,
+        'dispatched' => $results,
     ]);
     exit;
 }

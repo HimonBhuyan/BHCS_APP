@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -367,6 +368,53 @@ class BhNotificationService {
     try {
       appRouter.go(route);
     } catch (_) {}
+  }
+
+  /// Dispatches a real FCM HTTP v1 push via the live PHP/MySQL backend so
+  /// recipient Founders receive notifications even when their app is closed.
+  Future<void> dispatchRemoteFcmPush({
+    required String title,
+    required String body,
+    required String senderId,
+    String category = 'Messages',
+    String targetRoute = '/notifications',
+    List<String>? targetFounderIds,
+    bool includeAllFounders = false,
+  }) async {
+    if (_isTestEnv) return;
+    const pushEndpoints = <String>[
+      'http://127.0.0.1:8090/index.php?action=send_push',
+      'http://192.168.1.133:8090/index.php?action=send_push',
+    ];
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(milliseconds: 1500);
+    try {
+      final encoded = jsonEncode({
+        'title': title,
+        'body': body,
+        'category': category,
+        'targetRoute': targetRoute,
+        'senderId': senderId,
+        'targetFounderIds': ?targetFounderIds,
+        if (includeAllFounders) 'includeAllFounders': true,
+      });
+      for (final url in pushEndpoints) {
+        try {
+          final req = await client.postUrl(Uri.parse(url));
+          req.headers.contentType = ContentType.json;
+          req.write(encoded);
+          final resp = await req.close();
+          await resp.drain<void>();
+          if (resp.statusCode == 200) break;
+        } catch (_) {
+          // Try next endpoint
+        }
+      }
+    } catch (_) {
+      // Non-blocking remote push dispatch
+    } finally {
+      client.close(force: true);
+    }
   }
 }
 
