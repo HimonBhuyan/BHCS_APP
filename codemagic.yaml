@@ -1,0 +1,35 @@
+workflows:
+  blue-hour-hq-ios-android:
+    name: Blue Hour HQ (iOS + Android)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Get Flutter dependencies & run tests
+        script: |
+          cd mobile_app
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Install iOS CocoaPods
+        script: |
+          cd mobile_app/ios
+          pod install
+      - name: Build Android Release APK
+        script: |
+          cd mobile_app
+          flutter build apk --release
+      - name: Build iOS App (unsigned / ready for AltStore or App Store signing)
+        script: |
+          cd mobile_app
+          flutter build ios --release --no-codesign
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -r BlueHourHQ-iOS-Unsigned.ipa Payload
+    artifacts:
+      - mobile_app/build/app/outputs/flutter-apk/app-release.apk
+      - mobile_app/BlueHourHQ-iOS-Unsigned.ipa
+

@@ -1,0 +1,39 @@
+﻿{
+  "project_info": {
+    "project_number": "307870357552",
+    "project_id": "krypt-6a44c",
+    "storage_bucket": "krypt-6a44c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:307870357552:android:b7789307bfe2863a0175f5",
+        "android_client_info": {
+          "package_name": "com.bluehourstudios.blue_hour_hq"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "307870357552-d0p3ltm0vu7k7asp8v2aahqb9o36d0br.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDG871f6rQThwP5p5QI6v9sdrhHMnQSKTc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "307870357552-d0p3ltm0vu7k7asp8v2aahqb9o36d0br.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

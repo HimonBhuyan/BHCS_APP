@@ -1,0 +1,147 @@
+# ============================================================================
+# BLUE HOUR HQ — FIREBASE DATA CONNECT QUERIES
+# ============================================================================
+
+query ListFounders @auth(level: PUBLIC) {
+  founders(orderBy: [{ employeeCode: ASC }]) {
+    id
+    employeeCode
+    name
+    email
+    phone
+    role
+    isSuperAdmin
+    department
+    designation
+    isOnline
+    twoFactorEnabled
+    briefingTime
+  }
+}
+
+query ListWorkspaceSnapshot @auth(level: PUBLIC) {
+  founders(orderBy: [{ employeeCode: ASC }]) {
+    id
+    employeeCode
+    name
+    email
+    phone
+    role
+    isSuperAdmin
+    department
+    designation
+  }
+  leads(orderBy: [{ createdDate: DESC }]) {
+    id
+    leadCode
+    companyName
+    contactPerson
+    phone
+    email
+    location
+    industry
+    source
+    interestedService
+    estimatedBudgetInr
+    assignedEmployeeName
+    priority
+    status
+    expectedClosingDate
+    createdDate
+    nextFollowupAt
+    notes
+  }
+  clients(orderBy: [{ onboardedAt: DESC }]) {
+    id
+    clientCode
+    companyName
+    contactPerson
+    email
+    phone
+    accountManager
+    status
+    totalBilledInr
+    outstandingInr
+    activeProjectsCount
+    onboardedAt
+  }
+  projects(orderBy: [{ startDate: DESC }]) {
+    id
+    projectCode
+    name
+    clientName
+    category
+    description
+    projectManager
+    startDate
+    deadline
+    budgetInr
+    status
+    progressPercentage
+  }
+  tasks(orderBy: [{ deadline: ASC }]) {
+    id
+    taskCode
+    title
+    description
+    projectId
+    projectName
+    assignedEmployee
+    priority
+    status
+    startDate
+    deadline
+  }
+  meetings(orderBy: [{ startTime: ASC }]) {
+    id
+    meetingCode
+    title
+    clientOrCompany
+    startTime
+    endTime
+    meetingType
+    location
+    onlineMeetingLink
+    assignedEmployee
+    notes
+  }
+  invoices(orderBy: [{ issueDate: DESC }]) {
+    id
+    invoiceNumber
+    clientName
+    projectName
+    serviceCategory
+    issueDate
+    dueDate
+    totalAmountInr
+    paidAmountInr
+    status
+  }
+  chatThreads {
+    id
+    name
+    subtitle
+    isChannel
+    isPrivate
+    unreadCount
+    membersCount
+    lastMessagePreview
+    lastActivity
+  }
+  chatMessages(orderBy: [{ timestamp: ASC }]) {
+    id
+    threadId
+    senderId
+    senderName
+    senderRole
+    body
+    timestamp
+    messageType
+    attachmentName
+    voiceDurationSec
+    replyToSender
+    replyToPreview
+    isPinned
+  }
+}
+

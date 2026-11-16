@@ -1,0 +1,104 @@
+# ============================================================================
+# BLUE HOUR HQ — SEED THE 3 FOUNDERS & FOUNDERS CHAT THREADS IN DATA CONNECT
+# Run via the "Execute" CodeLens button in the Firebase SQL Connect extension
+# ============================================================================
+
+mutation SeedBlueHourFounders {
+  himon: founder_upsert(
+    data: {
+      id: "emp-01"
+      employeeCode: "BH-001"
+      name: "Himon Bhuyan"
+      email: "himonbhuyan@gmail.com"
+      phone: "+91 70022 01534"
+      role: "superAdmin"
+      isSuperAdmin: true
+      department: "Software Architecture, SaaS & AI"
+      designation: "Founder & Principal Software Architect"
+      isOnline: true
+      twoFactorEnabled: true
+      briefingTime: "08:30 AM"
+    }
+  )
+  darshana: founder_upsert(
+    data: {
+      id: "emp-02"
+      employeeCode: "BH-002"
+      name: "Darshana Das"
+      email: "darshana@bluehourstudios.in"
+      phone: "+91 84738 91457"
+      role: "founder"
+      isSuperAdmin: false
+      department: "Client Growth, Branding & Social Strategy"
+      designation: "Partner — Head of Client Growth & Social Media Strategy"
+      isOnline: true
+      twoFactorEnabled: true
+      briefingTime: "08:30 AM"
+    }
+  )
+  drishant: founder_upsert(
+    data: {
+      id: "emp-03"
+      employeeCode: "BH-003"
+      name: "Drishant Das"
+      email: "drishant@bluehourstudios.in"
+      phone: "+91 70028 45190"
+      role: "founder"
+      isSuperAdmin: false
+      department: "Hardware Engineering, Embedded & IoT Systems"
+      designation: "Co-Founder — Principal Hardware & IoT Architect"
+      isOnline: true
+      twoFactorEnabled: true
+      briefingTime: "08:30 AM"
+    }
+  )
+  board: chatThread_upsert(
+    data: {
+      id: "founders-hq"
+      name: "Founders Board"
+      subtitle: "Himon Bhuyan • Darshana Das • Drishant Das"
+      isChannel: true
+      isPrivate: true
+      unreadCount: 0
+      membersCount: 3
+      lastMessagePreview: "No messages yet"
+    }
+  )
+  dmDarshana: chatThread_upsert(
+    data: {
+      id: "dm-darshana"
+      name: "Darshana Das"
+      subtitle: "Partner — Head of Client Growth & Social Media Strategy"
+      isChannel: false
+      isPrivate: true
+      unreadCount: 0
+      membersCount: 2
+      lastMessagePreview: "No messages yet"
+    }
+  )
+  dmDrishant: chatThread_upsert(
+    data: {
+      id: "dm-drishant"
+      name: "Drishant Das"
+      subtitle: "Co-Founder — Principal Hardware & IoT Architect"
+      isChannel: false
+      isPrivate: true
+      unreadCount: 0
+      membersCount: 2
+      lastMessagePreview: "No messages yet"
+    }
+  )
+  dmHimon: chatThread_upsert(
+    data: {
+      id: "dm-himon"
+      name: "Himon Bhuyan"
+      subtitle: "Founder & Principal Software Architect"
+      isChannel: false
+      isPrivate: true
+      unreadCount: 0
+      membersCount: 2
+      lastMessagePreview: "No messages yet"
+    }
+  )
+}
+

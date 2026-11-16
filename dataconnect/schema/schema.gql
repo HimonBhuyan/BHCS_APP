@@ -1,0 +1,147 @@
+# ============================================================================
+# BLUE HOUR HQ — FIREBASE DATA CONNECT (SQL CONNECT) GRAPHQL SCHEMA
+# Studio: Blue Hour Creative Studios (https://theblue-hour-studios.vercel.app/)
+# Founders: Himon Bhuyan (Super Admin), Darshana Das (Partner), Drishant Das (Co-Founder)
+# ============================================================================
+
+type Founder @table(name: "founders", key: "id") {
+  id: String! @col(name: "id", dataType: "varchar(64)")
+  employeeCode: String! @col(name: "employee_code", dataType: "varchar(32)")
+  name: String! @col(name: "name", dataType: "varchar(120)")
+  email: String! @col(name: "email", dataType: "varchar(160)")
+  phone: String! @col(name: "phone", dataType: "varchar(40)")
+  role: String! @default(value: "founder") @col(name: "role", dataType: "varchar(40)")
+  isSuperAdmin: Boolean! @default(value: false) @col(name: "is_super_admin")
+  department: String! @col(name: "department", dataType: "varchar(160)")
+  designation: String! @col(name: "designation", dataType: "varchar(160)")
+  isOnline: Boolean! @default(value: true) @col(name: "is_online")
+  twoFactorEnabled: Boolean! @default(value: true) @col(name: "two_factor_enabled")
+  briefingTime: String! @default(value: "08:30 AM") @col(name: "briefing_time", dataType: "varchar(32)")
+}
+
+type Lead @table(name: "leads", key: "id") {
+  id: String! @col(name: "id", dataType: "varchar(64)")
+  leadCode: String! @col(name: "lead_code", dataType: "varchar(32)")
+  companyName: String! @col(name: "company_name", dataType: "varchar(180)")
+  contactPerson: String! @col(name: "contact_person", dataType: "varchar(140)")
+  phone: String! @col(name: "phone", dataType: "varchar(40)")
+  email: String! @default(value: "") @col(name: "email", dataType: "varchar(160)")
+  website: String! @default(value: "") @col(name: "website", dataType: "varchar(255)")
+  location: String! @default(value: "Guwahati, Assam") @col(name: "location", dataType: "varchar(140)")
+  industry: String! @default(value: "Technology & Digital") @col(name: "industry", dataType: "varchar(140)")
+  source: String! @col(name: "source", dataType: "varchar(80)")
+  interestedService: String! @col(name: "interested_service", dataType: "varchar(160)")
+  estimatedBudgetInr: Float! @default(value: 0.0) @col(name: "estimated_budget_inr")
+  assignedEmployeeName: String! @col(name: "assigned_employee_name", dataType: "varchar(120)")
+  priority: String! @default(value: "High") @col(name: "priority", dataType: "varchar(32)")
+  status: String! @default(value: "New Lead") @col(name: "status", dataType: "varchar(64)")
+  expectedClosingDate: Timestamp! @col(name: "expected_closing_date")
+  createdDate: Timestamp! @default(expr: "request.time") @col(name: "created_date")
+  nextFollowupAt: Timestamp @col(name: "next_followup_at")
+  notes: String @col(name: "notes")
+}
+
+type Client @table(name: "clients", key: "id") {
+  id: String! @col(name: "id", dataType: "varchar(64)")
+  clientCode: String! @col(name: "client_code", dataType: "varchar(32)")
+  companyName: String! @col(name: "company_name", dataType: "varchar(180)")
+  contactPerson: String! @col(name: "contact_person", dataType: "varchar(140)")
+  email: String! @default(value: "") @col(name: "email", dataType: "varchar(160)")
+  phone: String! @default(value: "") @col(name: "phone", dataType: "varchar(40)")
+  website: String! @default(value: "") @col(name: "website", dataType: "varchar(255)")
+  address: String! @default(value: "") @col(name: "address", dataType: "varchar(255)")
+  industry: String! @default(value: "") @col(name: "industry", dataType: "varchar(140)")
+  accountManager: String! @col(name: "account_manager", dataType: "varchar(120)")
+  status: String! @default(value: "Active") @col(name: "status", dataType: "varchar(40)")
+  totalBilledInr: Float! @default(value: 0.0) @col(name: "total_billed_inr")
+  outstandingInr: Float! @default(value: 0.0) @col(name: "outstanding_inr")
+  activeProjectsCount: Int! @default(value: 1) @col(name: "active_projects_count")
+  onboardedAt: Timestamp! @default(expr: "request.time") @col(name: "onboarded_at")
+  notes: String @col(name: "notes")
+}
+
+type Project @table(name: "projects", key: "id") {
+  id: String! @col(name: "id", dataType: "varchar(64)")
+  projectCode: String! @col(name: "project_code", dataType: "varchar(32)")
+  name: String! @col(name: "name", dataType: "varchar(180)")
+  clientName: String! @col(name: "client_name", dataType: "varchar(180)")
+  category: String! @col(name: "category", dataType: "varchar(120)")
+  description: String @col(name: "description")
+  projectManager: String! @col(name: "project_manager", dataType: "varchar(120)")
+  startDate: Timestamp! @default(expr: "request.time") @col(name: "start_date")
+  deadline: Timestamp! @col(name: "deadline")
+  budgetInr: Float! @default(value: 0.0) @col(name: "budget_inr")
+  status: String! @default(value: "In Progress") @col(name: "status", dataType: "varchar(40)")
+  progressPercentage: Int! @default(value: 0) @col(name: "progress_percentage")
+}
+
+type Task @table(name: "tasks", key: "id") {
+  id: String! @col(name: "id", dataType: "varchar(64)")
+  taskCode: String! @col(name: "task_code", dataType: "varchar(32)")
+  title: String! @col(name: "title", dataType: "varchar(200)")
+  description: String @col(name: "description")
+  projectId: String! @col(name: "project_id", dataType: "varchar(64)")
+  projectName: String! @col(name: "project_name", dataType: "varchar(180)")
+  assignedEmployee: String! @col(name: "assigned_employee", dataType: "varchar(120)")
+  priority: String! @default(value: "High") @col(name: "priority", dataType: "varchar(32)")
+  status: String! @default(value: "To Do") @col(name: "status", dataType: "varchar(40)")
+  startDate: Timestamp! @default(expr: "request.time") @col(name: "start_date")
+  deadline: Timestamp! @col(name: "deadline")
+}
+
+type Meeting @table(name: "meetings", key: "id") {
+  id: String! @col(name: "id", dataType: "varchar(64)")
+  meetingCode: String! @col(name: "meeting_code", dataType: "varchar(32)")
+  title: String! @col(name: "title", dataType: "varchar(200)")
+  clientOrCompany: String! @col(name: "client_or_company", dataType: "varchar(180)")
+  description: String @col(name: "description")
+  startTime: Timestamp! @col(name: "start_time")
+  endTime: Timestamp! @col(name: "end_time")
+  meetingType: String! @col(name: "meeting_type", dataType: "varchar(80)")
+  location: String! @col(name: "location", dataType: "varchar(180)")
+  onlineMeetingLink: String @col(name: "online_meeting_link", dataType: "varchar(255)")
+  assignedEmployee: String! @col(name: "assigned_employee", dataType: "varchar(120)")
+  notes: String @col(name: "notes")
+}
+
+type Invoice @table(name: "invoices", key: "id") {
+  id: String! @col(name: "id", dataType: "varchar(64)")
+  invoiceNumber: String! @col(name: "invoice_number", dataType: "varchar(32)")
+  clientName: String! @col(name: "client_name", dataType: "varchar(180)")
+  projectName: String! @col(name: "project_name", dataType: "varchar(180)")
+  serviceCategory: String! @col(name: "service_category", dataType: "varchar(140)")
+  issueDate: Timestamp! @default(expr: "request.time") @col(name: "issue_date")
+  dueDate: Timestamp! @col(name: "due_date")
+  totalAmountInr: Float! @default(value: 0.0) @col(name: "total_amount_inr")
+  paidAmountInr: Float! @default(value: 0.0) @col(name: "paid_amount_inr")
+  status: String! @default(value: "Sent") @col(name: "status", dataType: "varchar(40)")
+}
+
+type ChatThread @table(name: "chat_threads", key: "id") {
+  id: String! @col(name: "id", dataType: "varchar(64)")
+  name: String! @col(name: "name", dataType: "varchar(140)")
+  subtitle: String! @col(name: "subtitle", dataType: "varchar(220)")
+  isChannel: Boolean! @default(value: false) @col(name: "is_channel")
+  isPrivate: Boolean! @default(value: true) @col(name: "is_private")
+  unreadCount: Int! @default(value: 0) @col(name: "unread_count")
+  membersCount: Int! @default(value: 2) @col(name: "members_count")
+  lastMessagePreview: String! @default(value: "No messages yet") @col(name: "last_message_preview", dataType: "varchar(255)")
+  lastActivity: Timestamp! @default(expr: "request.time") @col(name: "last_activity")
+}
+
+type ChatMessage @table(name: "chat_messages", key: ["id", "threadId"]) {
+  id: String! @col(name: "id", dataType: "varchar(80)")
+  threadId: String! @col(name: "thread_id", dataType: "varchar(64)")
+  senderId: String! @col(name: "sender_id", dataType: "varchar(64)")
+  senderName: String! @col(name: "sender_name", dataType: "varchar(120)")
+  senderRole: String! @col(name: "sender_role", dataType: "varchar(160)")
+  body: String! @col(name: "body")
+  timestamp: Timestamp! @default(expr: "request.time") @col(name: "timestamp")
+  messageType: String! @default(value: "text") @col(name: "message_type", dataType: "varchar(32)")
+  attachmentName: String @col(name: "attachment_name", dataType: "varchar(255)")
+  voiceDurationSec: Int @col(name: "voice_duration_sec")
+  replyToSender: String @col(name: "reply_to_sender", dataType: "varchar(120)")
+  replyToPreview: String @col(name: "reply_to_preview")
+  isPinned: Boolean! @default(value: false) @col(name: "is_pinned")
+}
+

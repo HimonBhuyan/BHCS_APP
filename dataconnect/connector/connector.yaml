@@ -1,0 +1,5 @@
+connectorId: "blue-hour-mobile"
+generate:
+  dartSdk:
+    outputDir: "../generated/dart"
+    package: "blue_hour_dataconnect"

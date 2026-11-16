@@ -1,0 +1,130 @@
+# ============================================================================
+# BLUE HOUR HQ — FIREBASE DATA CONNECT MUTATIONS
+# ============================================================================
+
+mutation SendFounderChatMessage(
+  $id: String!
+  $threadId: String!
+  $senderId: String!
+  $senderName: String!
+  $senderRole: String!
+  $body: String!
+  $messageType: String!
+  $attachmentName: String
+  $voiceDurationSec: Int
+  $replyToSender: String
+  $replyToPreview: String
+) @auth(level: PUBLIC) {
+  chatMessage_upsert(
+    data: {
+      id: $id
+      threadId: $threadId
+      senderId: $senderId
+      senderName: $senderName
+      senderRole: $senderRole
+      body: $body
+      messageType: $messageType
+      attachmentName: $attachmentName
+      voiceDurationSec: $voiceDurationSec
+      replyToSender: $replyToSender
+      replyToPreview: $replyToPreview
+    }
+  )
+}
+
+mutation UpsertLead(
+  $id: String!
+  $leadCode: String!
+  $companyName: String!
+  $contactPerson: String!
+  $phone: String!
+  $email: String!
+  $location: String!
+  $industry: String!
+  $source: String!
+  $interestedService: String!
+  $estimatedBudgetInr: Float!
+  $assignedEmployeeName: String!
+  $priority: String!
+  $status: String!
+  $expectedClosingDate: Timestamp!
+  $notes: String
+) @auth(level: PUBLIC) {
+  lead_upsert(
+    data: {
+      id: $id
+      leadCode: $leadCode
+      companyName: $companyName
+      contactPerson: $contactPerson
+      phone: $phone
+      email: $email
+      location: $location
+      industry: $industry
+      source: $source
+      interestedService: $interestedService
+      estimatedBudgetInr: $estimatedBudgetInr
+      assignedEmployeeName: $assignedEmployeeName
+      priority: $priority
+      status: $status
+      expectedClosingDate: $expectedClosingDate
+      notes: $notes
+    }
+  )
+}
+
+mutation UpsertProject(
+  $id: String!
+  $projectCode: String!
+  $name: String!
+  $clientName: String!
+  $category: String!
+  $description: String
+  $projectManager: String!
+  $deadline: Timestamp!
+  $budgetInr: Float!
+  $status: String!
+  $progressPercentage: Int!
+) @auth(level: PUBLIC) {
+  project_upsert(
+    data: {
+      id: $id
+      projectCode: $projectCode
+      name: $name
+      clientName: $clientName
+      category: $category
+      description: $description
+      projectManager: $projectManager
+      deadline: $deadline
+      budgetInr: $budgetInr
+      status: $status
+      progressPercentage: $progressPercentage
+    }
+  )
+}
+
+mutation UpsertInvoice(
+  $id: String!
+  $invoiceNumber: String!
+  $clientName: String!
+  $projectName: String!
+  $serviceCategory: String!
+  $dueDate: Timestamp!
+  $totalAmountInr: Float!
+  $paidAmountInr: Float!
+  $status: String!
+) @auth(level: PUBLIC) {
+  invoice_upsert(
+    data: {
+      id: $id
+      invoiceNumber: $invoiceNumber
+      clientName: $clientName
+      projectName: $projectName
+      serviceCategory: $serviceCategory
+      dueDate: $dueDate
+      totalAmountInr: $totalAmountInr
+      paidAmountInr: $paidAmountInr
+      status: $status
+    }
+  )
+}
+

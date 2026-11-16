@@ -1,0 +1,12 @@
+specVersion: "v1"
+serviceId: "blue-hour-hq-sql"
+location: "asia-south1"
+schema:
+  source: "./schema"
+  datasource:
+    postgresql:
+      database: "blue_hour_hq_db"
+      cloudSql:
+        instanceId: "blue-hour-hq-pg"
+connectorDirs: ["./connector"]
+

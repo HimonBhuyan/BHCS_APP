@@ -1,0 +1,58 @@
+name: Blue Hour HQ — Android & iOS Cloud Release Builds
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build_android:
+    name: Build Shareable Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile_app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BlueHourHQ-Android-Release
+          path: mobile_app/build/app/outputs/flutter-apk/app-release.apk
+
+  build_ios:
+    name: Build iOS Bundle & Unsigned IPA (macOS)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mobile_app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter precache --ios
+      - run: flutter pub get
+      - run: flutter build ios --config-only --release --no-codesign
+      - run: |
+          cd ios
+          pod install --repo-update
+      - run: flutter build ios --release --no-codesign
+      - run: |
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -r BlueHourHQ-iOS-Unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BlueHourHQ-iOS-IPA
+          path: mobile_app/BlueHourHQ-iOS-Unsigned.ipa
