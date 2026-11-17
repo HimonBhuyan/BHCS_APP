@@ -290,6 +290,7 @@ void main() {
       find.byType(TextField),
       'Hello Co-Founders, testing real-time board chat!',
     );
+    await tester.pump();
     await tester.tap(find.byTooltip('Send Message'));
     await tester.pumpAndSettle();
 
@@ -788,5 +789,52 @@ void main() {
     expect(wiped.expenses, isEmpty);
     expect(wiped.notifications, isEmpty);
     expect(wiped.chatThreads.every((t) => t.messages.isEmpty), isTrue);
+  });
+
+  testWidgets(
+      '10. Chat UI: WhatsApp-style inline voice chat & built-in PDF/file viewer',
+      (WidgetTester tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final notifier = container.read(agencyStoreProvider.notifier);
+    notifier.sendChatMessage(
+      threadId: 'founders-hq',
+      body: 'Shared contract PDF for review',
+      messageType: 'document',
+      attachmentName: 'Contract.pdf',
+      attachmentSize: '420 KB',
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.darkTheme,
+          home: const ChatRoomScreen(threadId: 'founders-hq'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify WhatsApp mic button appears when composer is empty & sends inline voice note
+    expect(find.byTooltip('Hold or Tap to Record Voice Note'), findsOneWidget);
+    await tester.tap(find.byTooltip('Hold or Tap to Record Voice Note'));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Send Voice Note'), findsOneWidget);
+    expect(find.byTooltip('Delete Voice Recording'), findsOneWidget);
+    await tester.tap(find.byTooltip('Send Voice Note'));
+    await tester.pumpAndSettle();
+
+    // Waveform speed pill appears on voice message
+    expect(find.text('1x'), findsOneWidget);
+
+    // Tapping shared PDF opens built-in ChatAttachmentViewerScreen
+    expect(find.textContaining('Tap to open viewer'), findsOneWidget);
+    await tester.tap(find.text('Contract.pdf'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Contract.pdf'), findsWidgets);
   });
 }

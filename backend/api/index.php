@@ -39,6 +39,10 @@ function ensureStudioSchema(PDO $pdo): void {
         "SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'founders' LIMIT 1"
     )->fetchColumn();
     if ($exists) {
+        $hasAttachmentUrl = $pdo->query("SHOW COLUMNS FROM `chat_messages` LIKE 'attachment_url'")->fetchColumn();
+        if (!$hasAttachmentUrl) {
+            $pdo->exec("ALTER TABLE `chat_messages` ADD COLUMN `attachment_url` TEXT NULL AFTER `attachment_size`");
+        }
         return;
     }
     $ddl = [
@@ -54,7 +58,7 @@ function ensureStudioSchema(PDO $pdo): void {
         "CREATE TABLE IF NOT EXISTS `expenses` (`id` VARCHAR(64) NOT NULL PRIMARY KEY, `expense_code` VARCHAR(32) NOT NULL, `category` VARCHAR(120) NOT NULL, `vendor_name` VARCHAR(180) NOT NULL, `description` TEXT NULL, `amount_inr` DECIMAL(14,2) NOT NULL DEFAULT 0.00, `expense_date` DATETIME NOT NULL, `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS `notifications` (`id` VARCHAR(64) NOT NULL PRIMARY KEY, `category` VARCHAR(64) NOT NULL, `title` VARCHAR(200) NOT NULL, `body` TEXT NOT NULL, `timestamp` DATETIME NOT NULL, `is_read` TINYINT(1) NOT NULL DEFAULT 0, `target_route` VARCHAR(120) NULL, `entity_id` VARCHAR(64) NULL, `actions_json` JSON NOT NULL, `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS `chat_threads` (`id` VARCHAR(64) NOT NULL PRIMARY KEY, `name` VARCHAR(140) NOT NULL, `subtitle` VARCHAR(220) NOT NULL, `is_channel` TINYINT(1) NOT NULL DEFAULT 0, `is_private` TINYINT(1) NOT NULL DEFAULT 1, `unread_count` INT NOT NULL DEFAULT 0, `members_count` INT NOT NULL DEFAULT 2, `last_message_preview` VARCHAR(255) NOT NULL DEFAULT 'No messages yet', `last_activity` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-        "CREATE TABLE IF NOT EXISTS `chat_messages` (`id` VARCHAR(80) NOT NULL, `thread_id` VARCHAR(64) NOT NULL, `sender_id` VARCHAR(64) NOT NULL, `sender_name` VARCHAR(120) NOT NULL, `sender_role` VARCHAR(160) NOT NULL, `body` TEXT NOT NULL, `timestamp` DATETIME NOT NULL, `message_type` VARCHAR(32) NOT NULL DEFAULT 'text', `attachment_name` VARCHAR(255) NULL, `attachment_size` VARCHAR(64) NULL, `voice_duration_sec` INT NULL, `reply_to_sender` VARCHAR(120) NULL, `reply_to_preview` TEXT NULL, `reactions_json` JSON NOT NULL, `is_pinned` TINYINT(1) NOT NULL DEFAULT 0, PRIMARY KEY (`id`, `thread_id`), INDEX `idx_thread_timestamp` (`thread_id`, `timestamp`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+        "CREATE TABLE IF NOT EXISTS `chat_messages` (`id` VARCHAR(80) NOT NULL, `thread_id` VARCHAR(64) NOT NULL, `sender_id` VARCHAR(64) NOT NULL, `sender_name` VARCHAR(120) NOT NULL, `sender_role` VARCHAR(160) NOT NULL, `body` TEXT NOT NULL, `timestamp` DATETIME NOT NULL, `message_type` VARCHAR(32) NOT NULL DEFAULT 'text', `attachment_name` VARCHAR(255) NULL, `attachment_size` VARCHAR(64) NULL, `attachment_url` TEXT NULL, `voice_duration_sec` INT NULL, `reply_to_sender` VARCHAR(120) NULL, `reply_to_preview` TEXT NULL, `reactions_json` JSON NOT NULL, `is_pinned` TINYINT(1) NOT NULL DEFAULT 0, PRIMARY KEY (`id`, `thread_id`), INDEX `idx_thread_timestamp` (`thread_id`, `timestamp`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
     ];
     foreach ($ddl as $sql) {
         $pdo->exec($sql);
@@ -769,12 +773,12 @@ if ($action === 'sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $msgStmt = $pdo->prepare("
                 INSERT INTO `chat_messages` (
                     `id`, `thread_id`, `sender_id`, `sender_name`, `sender_role`, `body`,
-                    `timestamp`, `message_type`, `attachment_name`, `attachment_size`,
+                    `timestamp`, `message_type`, `attachment_name`, `attachment_size`, `attachment_url`,
                     `voice_duration_sec`, `reply_to_sender`, `reply_to_preview`,
                     `reactions_json`, `is_pinned`
                 ) VALUES (
                     :id, :thread_id, :sender_id, :sender_name, :sender_role, :body,
-                    :timestamp, :message_type, :attachment_name, :attachment_size,
+                    :timestamp, :message_type, :attachment_name, :attachment_size, :attachment_url,
                     :voice_duration_sec, :reply_to_sender, :reply_to_preview,
                     :reactions_json, :is_pinned
                 )
@@ -804,6 +808,7 @@ if ($action === 'sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         ':message_type' => $m['messageType'] ?? 'text',
                         ':attachment_name' => $m['attachmentName'] ?? null,
                         ':attachment_size' => $m['attachmentSize'] ?? null,
+                        ':attachment_url' => $m['attachmentUrl'] ?? null,
                         ':voice_duration_sec' => isset($m['voiceDurationSec']) ? (int) $m['voiceDurationSec'] : null,
                         ':reply_to_sender' => $m['replyToSender'] ?? null,
                         ':reply_to_preview' => $m['replyToPreview'] ?? null,
@@ -1039,6 +1044,7 @@ foreach ($pdo->query("SELECT * FROM `chat_messages` ORDER BY `timestamp` ASC")->
         'messageType' => $m['message_type'],
         'attachmentName' => $m['attachment_name'],
         'attachmentSize' => $m['attachment_size'],
+        'attachmentUrl' => $m['attachment_url'] ?? null,
         'voiceDurationSec' => $m['voice_duration_sec'] !== null ? (int) $m['voice_duration_sec'] : null,
         'replyToSender' => $m['reply_to_sender'],
         'replyToPreview' => $m['reply_to_preview'],

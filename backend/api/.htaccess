@@ -2,3 +2,4 @@
   Require all denied
 </FilesMatch>
 DirectoryIndex index.php
+

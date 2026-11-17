@@ -13,6 +13,7 @@ import '../../core/utils/formatters.dart';
 import '../../core/widgets/bh_widgets.dart';
 import '../../data/models/agency_models.dart';
 import '../../data/repositories/agency_store.dart';
+import 'chat_attachment_viewer.dart';
 
 class ChatListScreen extends ConsumerStatefulWidget {
   const ChatListScreen({super.key});
@@ -331,13 +332,38 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   Timer? _typingDebounce;
   AudioPlayer? _audioPlayer;
   StreamSubscription<void>? _playerCompleteSub;
+  StreamSubscription<Duration>? _playerPosSub;
+  StreamSubscription<Duration>? _playerDurSub;
+  Duration _audioPosition = Duration.zero;
+  Duration _audioDuration = Duration.zero;
+  double _playbackSpeed = 1.0;
+
+  // WhatsApp-style inline voice recording state
+  AudioRecorder? _recorder;
+  Timer? _recordTimer;
+  StreamSubscription<Amplitude>? _ampSub;
+  bool _isRecording = false;
+  bool _isRecordingLocked = false;
+  bool _isRecordingPaused = false;
+  bool _isSendingVoice = false;
+  bool _cancelBySlide = false;
+  int _recordedSec = 0;
+  double _dragOffsetX = 0;
+  double _dragOffsetY = 0;
+  Offset? _pressOrigin;
+  final List<double> _waveSamples = List<double>.filled(24, 0.25, growable: true);
 
   bool get _isTestEnv => Platform.environment.containsKey('FLUTTER_TEST');
 
   @override
   void dispose() {
     _typingDebounce?.cancel();
+    _recordTimer?.cancel();
+    _ampSub?.cancel();
+    _recorder?.dispose();
     _playerCompleteSub?.cancel();
+    _playerPosSub?.cancel();
+    _playerDurSub?.cancel();
     _audioPlayer?.dispose();
     _msgController.dispose();
     _scrollController.dispose();
@@ -357,6 +383,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     final wantsMention = val.endsWith('@');
     if (wantsMention != _showMentionBar) {
       setState(() => _showMentionBar = wantsMention);
+    } else {
+      setState(() {});
     }
   }
 
@@ -378,11 +406,20 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       try {
         await _audioPlayer?.stop();
       } catch (_) {}
-      if (mounted) setState(() => _playingVoiceMsgId = null);
+      if (mounted) {
+        setState(() {
+          _playingVoiceMsgId = null;
+          _audioPosition = Duration.zero;
+        });
+      }
       return;
     }
 
-    setState(() => _playingVoiceMsgId = msg.id);
+    setState(() {
+      _playingVoiceMsgId = msg.id;
+      _audioPosition = Duration.zero;
+      _audioDuration = Duration(seconds: msg.voiceDurationSec ?? 1);
+    });
     if (_isTestEnv || msg.attachmentUrl == null || msg.attachmentUrl!.isEmpty) {
       return;
     }
@@ -390,9 +427,24 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     try {
       _audioPlayer ??= AudioPlayer();
       _playerCompleteSub ??= _audioPlayer!.onPlayerComplete.listen((_) {
-        if (mounted) setState(() => _playingVoiceMsgId = null);
+        if (mounted) {
+          setState(() {
+            _playingVoiceMsgId = null;
+            _audioPosition = Duration.zero;
+          });
+        }
       });
+      _playerPosSub ??= _audioPlayer!.onPositionChanged.listen((pos) {
+        if (mounted) setState(() => _audioPosition = pos);
+      });
+      _playerDurSub ??= _audioPlayer!.onDurationChanged.listen((dur) {
+        if (mounted && dur.inMilliseconds > 0) {
+          setState(() => _audioDuration = dur);
+        }
+      });
+
       await _audioPlayer!.stop();
+      await _audioPlayer!.setPlaybackRate(_playbackSpeed);
       final url = msg.attachmentUrl!;
       if (url.startsWith('http')) {
         await _audioPlayer!.play(UrlSource(url));
@@ -402,6 +454,187 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     } catch (_) {
       if (mounted) setState(() => _playingVoiceMsgId = null);
     }
+  }
+
+  Future<void> _cyclePlaybackSpeed() async {
+    final next = _playbackSpeed == 1.0
+        ? 1.5
+        : (_playbackSpeed == 1.5 ? 2.0 : 1.0);
+    setState(() => _playbackSpeed = next);
+    try {
+      if (_playingVoiceMsgId != null) {
+        await _audioPlayer?.setPlaybackRate(next);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _startWhatsAppRecording({required bool locked}) async {
+    if (_isRecording || _isSendingVoice) return;
+    if (_isTestEnv) {
+      setState(() {
+        _isRecording = true;
+        _isRecordingLocked = locked;
+        _recordedSec = 1;
+      });
+      return;
+    }
+
+    try {
+      _recorder ??= AudioRecorder();
+      final permitted = await _recorder!.hasPermission();
+      if (!permitted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Microphone permission required for voice chat.'),
+            ),
+          );
+        }
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      final outPath =
+          '${dir.path}/bh_wa_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _recorder!.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 128000,
+        ),
+        path: outPath,
+      );
+      HapticFeedback.mediumImpact();
+
+      _ampSub?.cancel();
+      _ampSub = _recorder!
+          .onAmplitudeChanged(const Duration(milliseconds: 110))
+          .listen((amp) {
+        if (!mounted || _isRecordingPaused) return;
+        final normalized = ((amp.current + 55) / 55).clamp(0.15, 1.0);
+        setState(() {
+          if (_waveSamples.length >= 24) _waveSamples.removeAt(0);
+          _waveSamples.add(normalized);
+        });
+      });
+
+      _recordTimer?.cancel();
+      _recordedSec = 0;
+      _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted && _isRecording && !_isRecordingPaused) {
+          setState(() => _recordedSec++);
+        }
+      });
+
+      setState(() {
+        _isRecording = true;
+        _isRecordingLocked = locked;
+        _isRecordingPaused = false;
+        _cancelBySlide = false;
+        _dragOffsetX = 0;
+        _dragOffsetY = 0;
+      });
+    } catch (_) {
+      await _cancelWhatsAppRecording();
+    }
+  }
+
+  Future<void> _togglePauseRecording() async {
+    if (!_isRecording || _isTestEnv || _recorder == null) return;
+    try {
+      if (_isRecordingPaused) {
+        await _recorder!.resume();
+      } else {
+        await _recorder!.pause();
+      }
+      setState(() => _isRecordingPaused = !_isRecordingPaused);
+    } catch (_) {}
+  }
+
+  Future<void> _cancelWhatsAppRecording() async {
+    _recordTimer?.cancel();
+    _ampSub?.cancel();
+    try {
+      await _recorder?.cancel();
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _isRecording = false;
+        _isRecordingLocked = false;
+        _isRecordingPaused = false;
+        _cancelBySlide = false;
+        _recordedSec = 0;
+        _dragOffsetX = 0;
+        _dragOffsetY = 0;
+      });
+    }
+    HapticFeedback.lightImpact();
+  }
+
+  Future<void> _finishAndSendRecording() async {
+    if (!_isRecording || _isSendingVoice) return;
+    final durSec = _recordedSec < 1 ? 1 : _recordedSec;
+    _recordTimer?.cancel();
+    _ampSub?.cancel();
+
+    setState(() {
+      _isRecording = false;
+      _isRecordingLocked = false;
+      _isRecordingPaused = false;
+      _isSendingVoice = true;
+      _dragOffsetX = 0;
+      _dragOffsetY = 0;
+    });
+
+    try {
+      String? remoteUrl;
+      String? sizeLabel;
+      if (!_isTestEnv && _recorder != null) {
+        final path = await _recorder!.stop();
+        if (path != null && File(path).existsSync()) {
+          final uploaded = await ref
+              .read(agencyStoreProvider.notifier)
+              .uploadChatMedia(File(path));
+          remoteUrl = uploaded.url;
+          sizeLabel = uploaded.sizeLabel;
+        }
+      }
+      if (mounted) {
+        _sendMessage(
+          type: 'voice',
+          customBody: 'Voice Message',
+          attachmentName: 'VoiceNote.m4a',
+          attachmentSize: sizeLabel,
+          attachmentUrl: remoteUrl,
+          voiceSec: durSec,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSendingVoice = false;
+          _recordedSec = 0;
+        });
+      }
+    }
+  }
+
+  String _fmtDuration(int totalSeconds) {
+    final s = totalSeconds < 0 ? 0 : totalSeconds;
+    final m = s ~/ 60;
+    final rem = s % 60;
+    return '$m:${rem.toString().padLeft(2, '0')}';
+  }
+
+  void _openAttachmentViewer(ChatMessage msg) {
+    if (msg.attachmentName == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChatAttachmentViewerScreen(
+          fileName: msg.attachmentName!,
+          attachmentUrl: msg.attachmentUrl,
+          sizeLabel: msg.attachmentSize,
+        ),
+      ),
+    );
   }
 
   void _scrollToBottom() {
@@ -444,238 +677,6 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       _showMentionBar = false;
     });
     _scrollToBottom();
-  }
-
-  void _showVoiceNoteSheet() {
-    int selectedDurationSec = 12;
-    final noteCtrl = TextEditingController(text: 'Founder Voice Memo');
-    final recorder = _isTestEnv ? null : AudioRecorder();
-    bool isRecording = false;
-    bool isUploading = false;
-    int recordedSec = 0;
-    Timer? recordTimer;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 20,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: (isRecording
-                                  ? AppColors.error
-                                  : AppColors.electricBlue)
-                              .withValues(alpha: 0.16),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          isRecording ? Icons.graphic_eq_rounded : Icons.mic_rounded,
-                          color: isRecording
-                              ? AppColors.error
-                              : AppColors.electricBlue,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              isRecording
-                                  ? 'Recording Live • 0:${recordedSec.toString().padLeft(2, '0')}'
-                                  : 'Founder Voice Note',
-                              style: Theme.of(ctx).textTheme.headlineSmall,
-                            ),
-                            Text(
-                              isRecording
-                                  ? 'Tap Stop & Send to upload real audio'
-                                  : 'Record live microphone audio or send quick voice memo',
-                              style: Theme.of(ctx).textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: isUploading || recorder == null
-                          ? null
-                          : () async {
-                              if (!isRecording) {
-                                final permitted = await recorder.hasPermission();
-                                if (!permitted) {
-                                  if (ctx.mounted) {
-                                    ScaffoldMessenger.of(ctx).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Microphone permission required to record audio.',
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                  return;
-                                }
-                                final dir = await getTemporaryDirectory();
-                                final outPath =
-                                    '${dir.path}/bh_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-                                await recorder.start(
-                                  const RecordConfig(
-                                    encoder: AudioEncoder.aacLc,
-                                    bitRate: 128000,
-                                  ),
-                                  path: outPath,
-                                );
-                                recordedSec = 0;
-                                recordTimer?.cancel();
-                                recordTimer = Timer.periodic(
-                                  const Duration(seconds: 1),
-                                  (_) {
-                                    if (ctx.mounted) {
-                                      setModalState(() => recordedSec++);
-                                    }
-                                  },
-                                );
-                                setModalState(() => isRecording = true);
-                              } else {
-                                recordTimer?.cancel();
-                                setModalState(() {
-                                  isRecording = false;
-                                  isUploading = true;
-                                });
-                                final path = await recorder.stop();
-                                String? remoteUrl;
-                                String? sizeLabel;
-                                if (path != null && File(path).existsSync()) {
-                                  final uploaded = await ref
-                                      .read(agencyStoreProvider.notifier)
-                                      .uploadChatMedia(File(path));
-                                  remoteUrl = uploaded.url;
-                                  sizeLabel = uploaded.sizeLabel;
-                                }
-                                if (!ctx.mounted) return;
-                                _sendMessage(
-                                  type: 'voice',
-                                  customBody: noteCtrl.text.trim().isEmpty
-                                      ? 'Founder Voice Note'
-                                      : noteCtrl.text.trim(),
-                                  attachmentName: 'VoiceNote.m4a',
-                                  attachmentSize: sizeLabel,
-                                  attachmentUrl: remoteUrl,
-                                  voiceSec: recordedSec < 1 ? 1 : recordedSec,
-                                );
-                                Navigator.pop(ctx);
-                              }
-                            },
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor:
-                            isRecording ? AppColors.error : AppColors.electricBlue,
-                        side: BorderSide(
-                          color: isRecording
-                              ? AppColors.error
-                              : AppColors.electricBlue,
-                        ),
-                      ),
-                      icon: Icon(
-                        isRecording
-                            ? Icons.stop_circle_rounded
-                            : Icons.fiber_manual_record_rounded,
-                        size: 18,
-                      ),
-                      label: Text(
-                        isUploading
-                            ? 'Uploading Audio...'
-                            : (isRecording
-                                ? 'Stop & Send Voice Recording'
-                                : 'Start Live Mic Recording'),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: noteCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Voice Note Topic / Transcript Summary',
-                      prefixIcon: Icon(Icons.graphic_eq_rounded),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Quick Memo Duration:',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Text(
-                        '0:${selectedDurationSec.toString().padLeft(2, '0')} sec',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.electricBlue,
-                        ),
-                      ),
-                    ],
-                  ),
-                  Slider(
-                    value: selectedDurationSec.toDouble(),
-                    min: 4,
-                    max: 59,
-                    divisions: 55,
-                    activeColor: AppColors.electricBlue,
-                    onChanged: (v) =>
-                        setModalState(() => selectedDurationSec = v.round()),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: isRecording || isUploading
-                          ? null
-                          : () {
-                              _sendMessage(
-                                type: 'voice',
-                                customBody: noteCtrl.text.trim().isEmpty
-                                    ? 'Founder Voice Memo'
-                                    : noteCtrl.text.trim(),
-                                voiceSec: selectedDurationSec,
-                              );
-                              Navigator.pop(ctx);
-                            },
-                      icon: const Icon(Icons.send_rounded, size: 17),
-                      label: const Text('Send Voice Note'),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    ).whenComplete(() {
-      recordTimer?.cancel();
-      recorder?.dispose();
-    });
   }
 
   void _showShareAttachmentSheet() {
@@ -1223,141 +1224,330 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                     ),
                                   ),
 
-                                  // Voice Note Player if voice message
+                                  // WhatsApp-Style Voice Note Player if voice message
                                   if (msg.messageType == 'voice' ||
                                       msg.voiceDurationSec != null) ...[
-                                    const SizedBox(height: 10),
-                                    InkWell(
-                                      borderRadius: BorderRadius.circular(12),
-                                      onTap: () => _togglePlayVoice(msg),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 10,
-                                          vertical: 8,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black
-                                              .withValues(alpha: 0.22),
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(
-                                              isVoicePlaying
-                                                  ? Icons.pause_circle_filled_rounded
-                                                  : Icons.play_circle_fill_rounded,
-                                              color: Colors.white,
-                                              size: 24,
+                                    const SizedBox(height: 8),
+                                    Builder(
+                                      builder: (context) {
+                                        final totalSec = msg.voiceDurationSec ?? 12;
+                                        final durMs = isVoicePlaying &&
+                                                _audioDuration.inMilliseconds > 0
+                                            ? _audioDuration.inMilliseconds
+                                            : totalSec * 1000;
+                                        final progress = isVoicePlaying
+                                            ? (_audioPosition.inMilliseconds /
+                                                    durMs)
+                                                .clamp(0.0, 1.0)
+                                            : 0.0;
+                                        const barHeights = [
+                                          8.0, 14.0, 20.0, 11.0, 18.0, 24.0,
+                                          15.0, 9.0, 22.0, 16.0, 12.0, 20.0,
+                                          25.0, 14.0, 10.0, 19.0, 15.0, 21.0,
+                                          12.0, 9.0,
+                                        ];
+                                        return Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 8,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withValues(
+                                              alpha: isFromMe ? 0.22 : 0.14,
                                             ),
-                                            const SizedBox(width: 8),
-                                            Icon(
-                                              Icons.graphic_eq_rounded,
-                                              color: isVoicePlaying
-                                                  ? AppColors.cyanAccent
-                                                  : Colors.white70,
-                                              size: 20,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Text(
-                                              isVoicePlaying
-                                                  ? 'Playing 0:${(msg.voiceDurationSec ?? 12).toString().padLeft(2, '0')}'
-                                                  : '0:${(msg.voiceDurationSec ?? 12).toString().padLeft(2, '0')}',
-                                              style: const TextStyle(
-                                                fontSize: 11.5,
-                                                fontWeight: FontWeight.w700,
-                                                color: Colors.white,
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              InkWell(
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                                onTap: () =>
+                                                    _togglePlayVoice(msg),
+                                                child: Container(
+                                                  width: 38,
+                                                  height: 38,
+                                                  decoration: BoxDecoration(
+                                                    color: isFromMe
+                                                        ? Colors.white
+                                                            .withValues(
+                                                                alpha: 0.22)
+                                                        : AppColors.electricBlue
+                                                            .withValues(
+                                                                alpha: 0.2),
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                  child: Icon(
+                                                    isVoicePlaying
+                                                        ? Icons.pause_rounded
+                                                        : Icons
+                                                            .play_arrow_rounded,
+                                                    color: isFromMe
+                                                        ? Colors.white
+                                                        : AppColors.electricBlue,
+                                                    size: 24,
+                                                  ),
+                                                ),
                                               ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
+                                              const SizedBox(width: 10),
+                                              Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .center,
+                                                    children: List.generate(
+                                                      barHeights.length,
+                                                      (bi) {
+                                                        final barPct =
+                                                            (bi + 1) /
+                                                                barHeights
+                                                                    .length;
+                                                        final active =
+                                                            isVoicePlaying &&
+                                                                barPct <=
+                                                                    progress +
+                                                                        0.05;
+                                                        return Container(
+                                                          width: 3,
+                                                          height:
+                                                              barHeights[bi],
+                                                          margin:
+                                                              const EdgeInsets
+                                                                  .only(
+                                                                  right: 2.5),
+                                                          decoration:
+                                                              BoxDecoration(
+                                                            color: active
+                                                                ? AppColors
+                                                                    .cyanAccent
+                                                                : (isFromMe
+                                                                    ? Colors
+                                                                        .white
+                                                                        .withValues(
+                                                                            alpha:
+                                                                                0.55)
+                                                                    : AppColors
+                                                                        .electricBlue
+                                                                        .withValues(
+                                                                            alpha:
+                                                                                0.45)),
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                        99),
+                                                          ),
+                                                        );
+                                                      },
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Text(
+                                                        isVoicePlaying
+                                                            ? '${_fmtDuration(_audioPosition.inSeconds)} / ${_fmtDuration(totalSec)}'
+                                                            : _fmtDuration(
+                                                                totalSec),
+                                                        style: TextStyle(
+                                                          fontSize: 10.5,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                          color: isFromMe
+                                                              ? Colors.white70
+                                                              : (isDark
+                                                                  ? AppColors
+                                                                      .darkTextSecondary
+                                                                  : AppColors
+                                                                      .lightTextSecondary),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 10),
+                                                      GestureDetector(
+                                                        onTap:
+                                                            _cyclePlaybackSpeed,
+                                                        child: Container(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .symmetric(
+                                                            horizontal: 6,
+                                                            vertical: 1.5,
+                                                          ),
+                                                          decoration:
+                                                              BoxDecoration(
+                                                            color: Colors.black
+                                                                .withValues(
+                                                                    alpha: 0.2),
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                        999),
+                                                          ),
+                                                          child: Text(
+                                                            '${_playbackSpeed == 1.0 ? '1' : _playbackSpeed}x',
+                                                            style:
+                                                                const TextStyle(
+                                                              fontSize: 10,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w800,
+                                                              color:
+                                                                  Colors.white,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
                                     ),
                                   ],
 
-                                  // Image Preview if photo attachment
+                                  // Image Preview if photo attachment (tap opens full-screen viewer)
                                   if (msg.messageType == 'image' &&
                                       msg.attachmentUrl != null &&
                                       msg.attachmentUrl!.isNotEmpty) ...[
                                     const SizedBox(height: 10),
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: ConstrainedBox(
-                                        constraints: const BoxConstraints(
-                                          maxHeight: 180,
-                                          maxWidth: 230,
+                                    GestureDetector(
+                                      onTap: () => _openAttachmentViewer(msg),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: ConstrainedBox(
+                                          constraints: const BoxConstraints(
+                                            maxHeight: 180,
+                                            maxWidth: 230,
+                                          ),
+                                          child: msg.attachmentUrl!
+                                                  .startsWith('http')
+                                              ? Image.network(
+                                                  msg.attachmentUrl!,
+                                                  fit: BoxFit.cover,
+                                                  errorBuilder: (_, _, _) =>
+                                                      const SizedBox.shrink(),
+                                                )
+                                              : (File(msg.attachmentUrl!)
+                                                      .existsSync()
+                                                  ? Image.file(
+                                                      File(msg.attachmentUrl!),
+                                                      fit: BoxFit.cover,
+                                                    )
+                                                  : const SizedBox.shrink()),
                                         ),
-                                        child: msg.attachmentUrl!
-                                                .startsWith('http')
-                                            ? Image.network(
-                                                msg.attachmentUrl!,
-                                                fit: BoxFit.cover,
-                                                errorBuilder: (_, _, _) =>
-                                                    const SizedBox.shrink(),
-                                              )
-                                            : (File(msg.attachmentUrl!)
-                                                    .existsSync()
-                                                ? Image.file(
-                                                    File(msg.attachmentUrl!),
-                                                    fit: BoxFit.cover,
-                                                  )
-                                                : const SizedBox.shrink()),
                                       ),
                                     ),
                                   ],
 
-                                  // Document Attachment Preview
+                                  // Document / PDF / File Card (tap opens built-in Viewer)
                                   if (msg.attachmentName != null &&
                                       msg.messageType != 'voice') ...[
                                     const SizedBox(height: 10),
-                                    InkWell(
-                                      borderRadius: BorderRadius.circular(12),
-                                      onTap: () {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          SnackBar(
-                                            content: Text(
-                                              '${msg.attachmentName} (${msg.attachmentSize ?? 'Attached'})',
+                                    Builder(
+                                      builder: (context) {
+                                        final isPdf = msg.attachmentName!
+                                            .toLowerCase()
+                                            .endsWith('.pdf');
+                                        return InkWell(
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                          onTap: () =>
+                                              _openAttachmentViewer(msg),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(10),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black
+                                                  .withValues(alpha: 0.22),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              border: Border.all(
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.14),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.all(7),
+                                                  decoration: BoxDecoration(
+                                                    color: (isPdf
+                                                            ? AppColors.error
+                                                            : (msg.messageType ==
+                                                                    'image'
+                                                                ? AppColors
+                                                                    .cyanAccent
+                                                                : AppColors
+                                                                    .electricBlue))
+                                                        .withValues(
+                                                            alpha: 0.22),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            9),
+                                                  ),
+                                                  child: Icon(
+                                                    isPdf
+                                                        ? Icons
+                                                            .picture_as_pdf_rounded
+                                                        : (msg.messageType ==
+                                                                'image'
+                                                            ? Icons
+                                                                .image_rounded
+                                                            : Icons
+                                                                .description_rounded),
+                                                    color: Colors.white,
+                                                    size: 20,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 10),
+                                                Flexible(
+                                                  child: Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Text(
+                                                        msg.attachmentName!,
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        style: const TextStyle(
+                                                          fontSize: 12,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                          color: Colors.white,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(height: 2),
+                                                      Text(
+                                                        '${msg.attachmentSize ?? (isPdf ? 'PDF Document' : 'File')} • Tap to open viewer',
+                                                        style: TextStyle(
+                                                          fontSize: 10.5,
+                                                          color: Colors.white
+                                                              .withValues(
+                                                                  alpha: 0.78),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
                                         );
                                       },
-                                      child: Container(
-                                        padding: const EdgeInsets.all(10),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black
-                                              .withValues(alpha: 0.2),
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(
-                                              msg.messageType == 'image'
-                                                  ? Icons.image_rounded
-                                                  : Icons
-                                                      .insert_drive_file_rounded,
-                                              color: Colors.white,
-                                              size: 20,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Flexible(
-                                              child: Text(
-                                                msg.attachmentSize != null
-                                                    ? '${msg.attachmentName!} • ${msg.attachmentSize}'
-                                                    : msg.attachmentName!,
-                                                style: const TextStyle(
-                                                  fontSize: 11.5,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: Colors.white,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
                                     ),
                                   ],
 
@@ -1543,9 +1733,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                 ),
               ),
 
-            // Message Composer Bar
+            // WhatsApp-Style Composer Bar OR Live Recording Bar
             Container(
-              padding: const EdgeInsets.fromLTRB(6, 10, 10, 18),
+              padding: const EdgeInsets.fromLTRB(8, 10, 10, 18),
               decoration: BoxDecoration(
                 color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
                 border: Border(
@@ -1555,59 +1745,241 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                   ),
                 ),
               ),
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Attach Photo or File',
-                    onPressed: _showShareAttachmentSheet,
-                    icon: const Icon(Icons.attach_file_rounded, size: 21),
-                  ),
-                  IconButton(
-                    tooltip: 'Record Voice Note',
-                    onPressed: _showVoiceNoteSheet,
-                    icon: const Icon(Icons.mic_none_rounded, size: 21),
-                  ),
-                  IconButton(
-                    tooltip: 'Mention Founder (@)',
-                    onPressed: () =>
-                        setState(() => _showMentionBar = !_showMentionBar),
-                    icon: Icon(
-                      Icons.alternate_email_rounded,
-                      size: 20,
-                      color: _showMentionBar ? AppColors.electricBlue : null,
+              child: _isRecording
+                  ? _buildWhatsAppRecordingBar(isDark)
+                  : Row(
+                      children: [
+                        IconButton(
+                          tooltip: 'Attach Photo or File',
+                          onPressed: _showShareAttachmentSheet,
+                          icon: const Icon(Icons.attach_file_rounded, size: 21),
+                        ),
+                        IconButton(
+                          tooltip: 'Mention Founder (@)',
+                          onPressed: () =>
+                              setState(() => _showMentionBar = !_showMentionBar),
+                          icon: Icon(
+                            Icons.alternate_email_rounded,
+                            size: 20,
+                            color:
+                                _showMentionBar ? AppColors.electricBlue : null,
+                          ),
+                        ),
+                        Expanded(
+                          child: TextField(
+                            controller: _msgController,
+                            onChanged: _onComposerChanged,
+                            textInputAction: TextInputAction.send,
+                            onSubmitted: (_) => _sendMessage(),
+                            decoration: InputDecoration(
+                              hintText: 'Message ${thread.name}...',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (_isSendingVoice)
+                          const SizedBox(
+                            width: 44,
+                            height: 44,
+                            child: Center(
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                ),
+                              ),
+                            ),
+                          )
+                        else if (_msgController.text.trim().isNotEmpty)
+                          IconButton.filled(
+                            tooltip: 'Send Message',
+                            onPressed: _sendMessage,
+                            style: IconButton.styleFrom(
+                              backgroundColor: AppColors.electricBlue,
+                              padding: const EdgeInsets.all(13),
+                            ),
+                            icon: const Icon(
+                              Icons.send_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                          )
+                        else
+                          GestureDetector(
+                            onTap: () =>
+                                _startWhatsAppRecording(locked: true),
+                            onLongPressStart: (details) {
+                              _pressOrigin = details.globalPosition;
+                              _startWhatsAppRecording(locked: false);
+                            },
+                            onLongPressMoveUpdate: (details) {
+                              if (!_isRecording || _isRecordingLocked) return;
+                              final origin = _pressOrigin ?? details.globalPosition;
+                              final dx = details.globalPosition.dx - origin.dx;
+                              final dy = details.globalPosition.dy - origin.dy;
+                              setState(() {
+                                _dragOffsetX = dx;
+                                _dragOffsetY = dy;
+                                _cancelBySlide = dx < -85;
+                              });
+                              if (dy < -55) {
+                                HapticFeedback.lightImpact();
+                                setState(() {
+                                  _isRecordingLocked = true;
+                                  _cancelBySlide = false;
+                                });
+                              } else if (_cancelBySlide) {
+                                _cancelWhatsAppRecording();
+                              }
+                            },
+                            onLongPressEnd: (_) {
+                              if (_isRecording &&
+                                  !_isRecordingLocked &&
+                                  !_cancelBySlide) {
+                                _finishAndSendRecording();
+                              }
+                            },
+                            child: Tooltip(
+                              message: 'Hold or Tap to Record Voice Note',
+                              child: Container(
+                                width: 46,
+                                height: 46,
+                                decoration: const BoxDecoration(
+                                  gradient: AppColors.brandGradient,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.mic_rounded,
+                                  color: Colors.white,
+                                  size: 22,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: _msgController,
-                      onChanged: _onComposerChanged,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _sendMessage(),
-                      decoration: InputDecoration(
-                        hintText: 'Message ${thread.name}...',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    tooltip: 'Send Message',
-                    onPressed: _sendMessage,
-                    style: IconButton.styleFrom(
-                      backgroundColor: AppColors.electricBlue,
-                      padding: const EdgeInsets.all(13),
-                    ),
-                    icon: const Icon(
-                      Icons.send_rounded,
-                      color: Colors.white,
-                      size: 18,
-                    ),
-                  ),
-                ],
-              ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildWhatsAppRecordingBar(bool isDark) {
+    return Row(
+      children: [
+        IconButton(
+          tooltip: 'Delete Voice Recording',
+          onPressed: _cancelWhatsAppRecording,
+          icon: const Icon(
+            Icons.delete_outline_rounded,
+            color: AppColors.error,
+            size: 24,
+          ),
+        ),
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: _isRecordingPaused ? AppColors.warning : AppColors.error,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          _fmtDuration(_recordedSec),
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _isRecordingLocked
+              ? SizedBox(
+                  height: 28,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: _waveSamples
+                        .take(18)
+                        .map(
+                          (v) => AnimatedContainer(
+                            duration: const Duration(milliseconds: 90),
+                            width: 3,
+                            height: 6 + (v * 20),
+                            margin: const EdgeInsets.only(right: 2.5),
+                            decoration: BoxDecoration(
+                              color: AppColors.electricBlue,
+                              borderRadius: BorderRadius.circular(99),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                )
+              : Transform.translate(
+                  offset: Offset(_dragOffsetX.clamp(-80, 0), 0),
+                  child: Text(
+                    _dragOffsetY < -20
+                        ? '↑ Release to Lock'
+                        : '< Slide left to cancel',
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: isDark
+                          ? AppColors.darkTextSecondary
+                          : AppColors.lightTextSecondary,
+                    ),
+                  ),
+                ),
+        ),
+        if (_isRecordingLocked) ...[
+          IconButton(
+            tooltip: _isRecordingPaused ? 'Resume' : 'Pause',
+            onPressed: _togglePauseRecording,
+            icon: Icon(
+              _isRecordingPaused
+                  ? Icons.mic_rounded
+                  : Icons.pause_circle_outline_rounded,
+              color: AppColors.electricBlue,
+              size: 24,
+            ),
+          ),
+          IconButton.filled(
+            tooltip: 'Send Voice Note',
+            onPressed: _finishAndSendRecording,
+            style: IconButton.styleFrom(
+              backgroundColor: AppColors.electricBlue,
+              padding: const EdgeInsets.all(12),
+            ),
+            icon: const Icon(
+              Icons.send_rounded,
+              color: Colors.white,
+              size: 18,
+            ),
+          ),
+        ] else
+          Transform.translate(
+            offset: Offset(0, _dragOffsetY.clamp(-50, 0)),
+            child: Container(
+              width: 50,
+              height: 50,
+              decoration: const BoxDecoration(
+                color: AppColors.error,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.mic_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
