@@ -303,7 +303,8 @@ function sendFcmPushToTopic(string $topic, string $title, string $body, string $
     ];
 }
 
-$action = $_GET['action'] ?? ($_SERVER['REQUEST_METHOD'] === 'POST' ? 'sync' : 'pull');
+$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+$action = $_GET['action'] ?? ($requestPath === '/health' ? 'health' : ($_SERVER['REQUEST_METHOD'] === 'POST' ? 'sync' : 'pull'));
 
 if ($action === 'health') {
     $counts = [];
