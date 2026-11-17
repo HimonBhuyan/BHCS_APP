@@ -453,15 +453,14 @@ class ProfileAndSettingsScreen extends ConsumerWidget {
                     ),
                     title: const Text('Live Cloud Server URL (Railway)'),
                     subtitle: Text(
-                      BhServerConfig.instance.liveBaseUrl ??
-                          'Local Studio Wi-Fi (192.168.29.26:8090)',
+                      BhServerConfig.instance.activeBaseUrl,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     trailing: TextButton(
                       onPressed: () async {
                         final urlCtrl = TextEditingController(
-                          text: BhServerConfig.instance.liveBaseUrl ?? '',
+                          text: BhServerConfig.instance.activeBaseUrl,
                         );
                         String? statusMsg;
                         bool? statusOk;
@@ -485,7 +484,7 @@ class ProfileAndSettingsScreen extends ConsumerWidget {
                                     decoration: const InputDecoration(
                                       labelText: 'HTTPS Base URL',
                                       hintText:
-                                          'https://blue-hour-api.up.railway.app',
+                                          'https://blue-hour-api-production.up.railway.app',
                                     ),
                                   ),
                                   if (statusMsg != null) ...[

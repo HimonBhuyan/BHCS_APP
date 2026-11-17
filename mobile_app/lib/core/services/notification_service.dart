@@ -483,5 +483,13 @@ class BhNotificationService {
       client.close(force: true);
     }
   }
+
+  /// Clears delivered local/FCM banners from the OS tray once read in-app.
+  Future<void> clearDeliveredNotifications() async {
+    if (_isTestEnv) return;
+    try {
+      await _localPlugin.cancelAll();
+    } catch (_) {}
+  }
 }
 

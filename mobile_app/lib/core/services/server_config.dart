@@ -8,6 +8,8 @@ class BhServerConfig {
   static final BhServerConfig instance = BhServerConfig._();
 
   static const String _kPrefServerUrl = 'bh_live_server_url';
+  static const String defaultCloudBaseUrl =
+      'https://blue-hour-api-production.up.railway.app';
   static const List<String> _kLocalFallbackBases = <String>[
     'http://127.0.0.1:8090',
     'http://192.168.29.26:8090',
@@ -17,6 +19,10 @@ class BhServerConfig {
   String? _liveBaseUrl;
 
   String? get liveBaseUrl => _liveBaseUrl;
+  String get activeBaseUrl =>
+      (_liveBaseUrl != null && _liveBaseUrl!.isNotEmpty)
+          ? _liveBaseUrl!
+          : defaultCloudBaseUrl;
 
   static String normalizeBaseUrl(String raw) {
     var trimmed = raw.trim();
@@ -52,8 +58,8 @@ class BhServerConfig {
   }
 
   List<String> get baseUrls => <String>[
-        if (_liveBaseUrl != null && _liveBaseUrl!.isNotEmpty) _liveBaseUrl!,
-        ..._kLocalFallbackBases,
+        activeBaseUrl,
+        ..._kLocalFallbackBases.where((b) => b != activeBaseUrl),
       ];
 
   List<String> actionUrls(String action) =>

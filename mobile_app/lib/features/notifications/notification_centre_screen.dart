@@ -18,6 +18,23 @@ class NotificationCentreScreen extends ConsumerStatefulWidget {
 class _NotificationCentreScreenState
     extends ConsumerState<NotificationCentreScreen> {
   String _selectedCategory = 'All';
+  bool _markReadQueued = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _queueMarkAllRead();
+  }
+
+  void _queueMarkAllRead() {
+    if (_markReadQueued) return;
+    _markReadQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _markReadQueued = false;
+      if (!mounted) return;
+      ref.read(agencyStoreProvider.notifier).markAllNotificationsRead();
+    });
+  }
 
   void _showNotificationPreferencesSheet() {
     showModalBottomSheet(
@@ -279,6 +296,10 @@ class _NotificationCentreScreenState
     final state = ref.watch(agencyStoreProvider);
     final notifier = ref.read(agencyStoreProvider.notifier);
     final textTheme = Theme.of(context).textTheme;
+
+    if (state.unreadNotificationCount > 0) {
+      _queueMarkAllRead();
+    }
 
     final filtered = state.notifications.where((n) {
       if (_selectedCategory == 'All') return true;

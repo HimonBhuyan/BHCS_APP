@@ -922,5 +922,20 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Seen by Darshana, Drishant'), findsOneWidget);
+
+    // 5. Opening Notification Centre auto-clears unreadNotificationCount badge
+    await notifier.triggerTestPushNotification();
+    expect(container.read(agencyStoreProvider).unreadNotificationCount, greaterThan(0));
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.darkTheme,
+          home: const NotificationCentreScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(container.read(agencyStoreProvider).unreadNotificationCount, 0);
   });
 }

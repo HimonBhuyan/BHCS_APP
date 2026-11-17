@@ -1082,8 +1082,14 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
           );
         }).toList();
 
-        var effectiveUnread = savedUnread;
-        if (previousThreads != null &&
+        final hasSeenTracking = msgs.any((m) => m.seenBy.isNotEmpty);
+        final unseenForFounder = msgs
+            .where((m) => m.senderId != founderId && !m.seenBy.contains(founderId))
+            .length;
+        var effectiveUnread =
+            hasSeenTracking ? unseenForFounder : savedUnread;
+        if (!hasSeenTracking &&
+            previousThreads != null &&
             (t.isChannel || t.name != activeFounderName)) {
           final prevThread = previousThreads.cast<ChatThread?>().firstWhere(
                 (p) => p?.id == t.id,
@@ -1891,7 +1897,15 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
     }
 
     if (targetThread.unreadCount == 0 && seenMessageIds.isEmpty) {
-      return;
+      final hasMatchingUnreadChatNotif = state.notifications.any(
+        (n) =>
+            !n.isRead &&
+            n.category == 'Messages' &&
+            (n.entityId == threadId ||
+                (!targetThread.isChannel &&
+                    n.body.startsWith('${targetThread.name}:'))),
+      );
+      if (!hasMatchingUnreadChatNotif) return;
     }
 
     var changed = false;
@@ -1932,8 +1946,28 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       );
     }).toList();
 
-    if (!changed) return;
-    state = state.copyWith(chatThreads: updatedThreads);
+    final reciprocalDmId =
+        !targetThread.isChannel ? _dmThreadIdForFounderId(viewerId) : null;
+    var notifsChanged = false;
+    final updatedNotifications = state.notifications.map((n) {
+      if (n.isRead || n.category != 'Messages') return n;
+      final matchesThread = n.entityId == threadId ||
+          (reciprocalDmId != null && n.entityId == reciprocalDmId) ||
+          (!targetThread.isChannel &&
+              n.body.startsWith('${targetThread.name}:'));
+      if (!matchesThread) return n;
+      notifsChanged = true;
+      return n.copyWith(isRead: true);
+    }).toList();
+
+    if (!changed && !notifsChanged) return;
+    state = state.copyWith(
+      chatThreads: changed ? updatedThreads : null,
+      notifications: notifsChanged ? updatedNotifications : null,
+    );
+    if (notifsChanged && !updatedNotifications.any((n) => !n.isRead)) {
+      unawaited(BhNotificationService.instance.clearDeliveredNotifications());
+    }
   }
 
   void toggleMessageReaction(String threadId, String messageId, String emoji) {
@@ -2279,17 +2313,25 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
   }
 
   void markNotificationRead(String id) {
+    var changed = false;
     final updated = state.notifications.map((n) {
-      if (n.id != id) return n;
+      if (n.id != id || n.isRead) return n;
+      changed = true;
       return n.copyWith(isRead: true);
     }).toList();
+    if (!changed) return;
     state = state.copyWith(notifications: updated);
+    if (!updated.any((n) => !n.isRead)) {
+      unawaited(BhNotificationService.instance.clearDeliveredNotifications());
+    }
   }
 
   void markAllNotificationsRead() {
+    if (!state.notifications.any((n) => !n.isRead)) return;
     final updated =
         state.notifications.map((n) => n.copyWith(isRead: true)).toList();
     state = state.copyWith(notifications: updated);
+    unawaited(BhNotificationService.instance.clearDeliveredNotifications());
   }
 
   /// Removes a single notification card and syncs the deletion locally & remotely.
