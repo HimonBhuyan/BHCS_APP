@@ -10,7 +10,8 @@ WORKDIR /var/www/html
 COPY backend/api/ /var/www/html/
 
 RUN mkdir -p /var/www/uploads \
-    && chown -R www-data:www-data /var/www/html /var/www/uploads
+    && chown -R www-data:www-data /var/www/html /var/www/uploads \
+    && printf "upload_max_filesize=20M\npost_max_size=25M\nmemory_limit=256M\n" > /usr/local/etc/php/conf.d/uploads.ini
 
-CMD ["sh", "-c", "PORT=${PORT:-80}; sed -i \"s/80/$PORT/g\" /etc/apache2/ports.conf /etc/apache2/sites-available/000-default.conf && exec apache2-foreground"]
+CMD ["sh", "-c", "mkdir -p /var/www/uploads && chown -R www-data:www-data /var/www/uploads && PORT=${PORT:-80}; sed -i \"s/Listen 80/Listen $PORT/g\" /etc/apache2/ports.conf && sed -i \"s/:80>/:$PORT>/g\" /etc/apache2/sites-available/000-default.conf && exec apache2-foreground"]
 
