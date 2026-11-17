@@ -501,6 +501,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
                     'replyToPreview': m.replyToPreview,
                     'reactions': m.reactions,
                     'isPinned': m.isPinned,
+                    'seenBy': m.seenBy,
                   })
               .toList(),
       },
@@ -1074,6 +1075,10 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
             replyToPreview: m['replyToPreview'] as String?,
             reactions: parsedReactions,
             isPinned: m['isPinned'] as bool? ?? false,
+            isRead: m['isRead'] as bool? ?? true,
+            seenBy: m['seenBy'] is List
+                ? List<String>.from(m['seenBy'] as List)
+                : const <String>[],
           );
         }).toList();
 
@@ -1772,6 +1777,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       voiceDurationSec: voiceDurationSec,
       replyToSender: replyToSender,
       replyToPreview: replyToPreview,
+      seenBy: [state.currentUser.id],
     );
 
     final targetThread = state.chatThreads.firstWhere(
@@ -1871,10 +1877,62 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
   }
 
   void markThreadRead(String threadId) {
+    final viewerId = state.currentUser.id;
+    final targetThread = state.chatThreads.firstWhere(
+      (t) => t.id == threadId,
+      orElse: () => state.chatThreads.first,
+    );
+
+    final seenMessageIds = <String>{};
+    for (final m in targetThread.messages) {
+      if (!m.seenBy.contains(viewerId)) {
+        seenMessageIds.add(m.id);
+      }
+    }
+
+    if (targetThread.unreadCount == 0 && seenMessageIds.isEmpty) {
+      return;
+    }
+
+    var changed = false;
     final updatedThreads = state.chatThreads.map((t) {
-      if (t.id != threadId) return t;
-      return t.copyWith(unreadCount: 0);
+      final isTarget = t.id == threadId;
+      final isCounterpartDm =
+          !targetThread.isChannel && !t.isChannel && !isTarget;
+
+      if (!isTarget && !isCounterpartDm) {
+        return t;
+      }
+
+      var threadMsgsChanged = false;
+      final updatedMessages = t.messages.map((m) {
+        final shouldMark = isTarget
+            ? !m.seenBy.contains(viewerId)
+            : (seenMessageIds.contains(m.id) && !m.seenBy.contains(viewerId));
+        if (!shouldMark) return m;
+        threadMsgsChanged = true;
+        return m.copyWith(
+          isRead: true,
+          seenBy: [...m.seenBy, viewerId],
+        );
+      }).toList();
+
+      if (isTarget && t.unreadCount != 0) {
+        changed = true;
+      }
+      if (threadMsgsChanged) {
+        changed = true;
+      }
+      if (!threadMsgsChanged && (!isTarget || t.unreadCount == 0)) {
+        return t;
+      }
+      return t.copyWith(
+        unreadCount: isTarget ? 0 : t.unreadCount,
+        messages: threadMsgsChanged ? updatedMessages : null,
+      );
     }).toList();
+
+    if (!changed) return;
     state = state.copyWith(chatThreads: updatedThreads);
   }
 

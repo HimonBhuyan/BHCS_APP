@@ -243,17 +243,40 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
                                         ),
                                       ),
                                       const SizedBox(height: 4),
-                                      Text(
-                                        thread.messages.isEmpty
-                                            ? 'Tap to start messaging'
-                                            : thread.lastMessagePreview,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: textTheme.bodySmall?.copyWith(
-                                          fontWeight: thread.unreadCount > 0
-                                              ? FontWeight.w700
-                                              : null,
-                                        ),
+                                      Row(
+                                        children: [
+                                          if (thread.messages.isNotEmpty &&
+                                              thread.messages.last.senderId ==
+                                                  state.currentUser.id) ...[
+                                            Icon(
+                                              state.isOfflineMode
+                                                  ? Icons.done_rounded
+                                                  : Icons.done_all_rounded,
+                                              size: 14,
+                                              color: thread.messages.last
+                                                      .isSeenByOthers
+                                                  ? const Color(0xFF38BDF8)
+                                                  : Colors.grey,
+                                            ),
+                                            const SizedBox(width: 4),
+                                          ],
+                                          Expanded(
+                                            child: Text(
+                                              thread.messages.isEmpty
+                                                  ? 'Tap to start messaging'
+                                                  : thread.lastMessagePreview,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: textTheme.bodySmall
+                                                  ?.copyWith(
+                                                fontWeight:
+                                                    thread.unreadCount > 0
+                                                        ? FontWeight.w700
+                                                        : null,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ],
                                   ),
@@ -354,6 +377,35 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   final List<double> _waveSamples = List<double>.filled(24, 0.25, growable: true);
 
   bool get _isTestEnv => Platform.environment.containsKey('FLUTTER_TEST');
+  bool _readSyncQueued = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _queueMarkThreadRead();
+  }
+
+  void _queueMarkThreadRead() {
+    if (_readSyncQueued) return;
+    _readSyncQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _readSyncQueued = false;
+      if (!mounted) return;
+      ref.read(agencyStoreProvider.notifier).markThreadRead(widget.threadId);
+    });
+  }
+
+  List<String> _resolveSeenByFirstNames(
+    ChatMessage msg,
+    List<AppUser> employees,
+  ) {
+    final otherIds = msg.seenByOtherIds;
+    if (otherIds.isEmpty) return const [];
+    final byId = {for (final e in employees) e.id: e.name};
+    return otherIds
+        .map((id) => (byId[id] ?? id).split(' ').first)
+        .toList();
+  }
 
   @override
   void dispose() {
@@ -823,7 +875,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
   void _showMessageActionsSheet(ChatThread thread, ChatMessage msg) {
     final notifier = ref.read(agencyStoreProvider.notifier);
-    final currentFounder = ref.read(agencyStoreProvider).currentUser;
+    final storeState = ref.read(agencyStoreProvider);
+    final currentFounder = storeState.currentUser;
+    final seenNames = _resolveSeenByFirstNames(msg, storeState.employees);
 
     showModalBottomSheet(
       context: context,
@@ -835,6 +889,50 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Read receipt status
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: (seenNames.isNotEmpty
+                            ? const Color(0xFF38BDF8)
+                            : Colors.grey)
+                        .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        storeState.isOfflineMode
+                            ? Icons.done_rounded
+                            : Icons.done_all_rounded,
+                        size: 16,
+                        color: seenNames.isNotEmpty
+                            ? const Color(0xFF38BDF8)
+                            : Colors.grey,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          seenNames.isNotEmpty
+                              ? 'Seen by ${seenNames.join(', ')}'
+                              : 'Delivered • Waiting to be seen',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: seenNames.isNotEmpty
+                                ? const Color(0xFF38BDF8)
+                                : null,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 // Quick Emoji Reaction Bar
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -981,6 +1079,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     );
     final pinnedMessages =
         thread.messages.where((m) => m.isPinned).toList();
+    final hasUnmarkedForViewer = thread.unreadCount > 0 ||
+        thread.messages.any((m) => !m.seenBy.contains(state.currentUser.id));
+    if (hasUnmarkedForViewer) {
+      _queueMarkThreadRead();
+    }
     final textTheme = Theme.of(context).textTheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -1619,12 +1722,73 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                                       .lightTextSecondary),
                                         ),
                                       ),
-                                      if (isFromMe)
-                                        const Icon(
-                                          Icons.done_all_rounded,
-                                          size: 14,
-                                          color: Colors.white,
+                                      if (isFromMe) ...[
+                                        const SizedBox(width: 6),
+                                        Builder(
+                                          builder: (_) {
+                                            final seenNames =
+                                                _resolveSeenByFirstNames(
+                                              msg,
+                                              state.employees,
+                                            );
+                                            final isSeen = seenNames.isNotEmpty;
+                                            final seenLabel = thread.isChannel
+                                                ? 'Seen by ${seenNames.join(', ')}'
+                                                : 'Seen';
+                                            return Container(
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: isSeen ? 6 : 2,
+                                                vertical: isSeen ? 2 : 0,
+                                              ),
+                                              decoration: isSeen
+                                                  ? BoxDecoration(
+                                                      color: Colors.black
+                                                          .withValues(
+                                                              alpha: 0.22),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              999),
+                                                      border: Border.all(
+                                                        color: const Color(
+                                                          0xFF38BDF8,
+                                                        ).withValues(
+                                                            alpha: 0.55),
+                                                      ),
+                                                    )
+                                                  : null,
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    state.isOfflineMode
+                                                        ? Icons.done_rounded
+                                                        : Icons
+                                                            .done_all_rounded,
+                                                    size: 14,
+                                                    color: isSeen
+                                                        ? const Color(
+                                                            0xFF38BDF8)
+                                                        : Colors.white70,
+                                                  ),
+                                                  if (isSeen) ...[
+                                                    const SizedBox(width: 3),
+                                                    Text(
+                                                      seenLabel,
+                                                      style: const TextStyle(
+                                                        fontSize: 10,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                        color:
+                                                            Color(0xFF7DD3FC),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ],
+                                              ),
+                                            );
+                                          },
                                         ),
+                                      ],
                                     ],
                                   ),
                                 ],

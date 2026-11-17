@@ -837,4 +837,90 @@ void main() {
 
     expect(find.text('Contract.pdf'), findsWidgets);
   });
+
+  testWidgets(
+      '11. Chat Read Receipts: Blue double-tick & Seen by others across DM and Board',
+      (WidgetTester tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final notifier = container.read(agencyStoreProvider.notifier);
+
+    // Himon sends a DM to Darshana and a message in Founders Board
+    notifier.sendChatMessage(
+      threadId: 'dm-darshana',
+      body: 'Hey Darshana, check the deck',
+    );
+    notifier.sendChatMessage(
+      threadId: 'founders-hq',
+      body: 'Team standup in 10 mins',
+    );
+
+    // 1. Before Darshana opens DM, Himon sees delivered state without 'Seen'
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.darkTheme,
+          home: const ChatRoomScreen(threadId: 'dm-darshana'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Seen'), findsNothing);
+
+    // 2. Darshana switches profile and opens her reciprocal DM with Himon
+    notifier.switchActiveFounder('emp-02');
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.darkTheme,
+          home: const ChatRoomScreen(threadId: 'dm-himon'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Mark Founders Board read as Darshana and Drishant too
+    notifier.markThreadRead('founders-hq');
+    notifier.switchActiveFounder('emp-03');
+    notifier.markThreadRead('founders-hq');
+
+    // 3. Himon returns to dm-darshana and sees the Blue Tick + 'Seen'
+    notifier.switchActiveFounder('emp-01');
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.darkTheme,
+          home: const ChatRoomScreen(threadId: 'dm-darshana'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Seen'), findsOneWidget);
+    final blueTickFinder = find.byWidgetPredicate(
+      (w) =>
+          w is Icon &&
+          w.icon == Icons.done_all_rounded &&
+          w.color == const Color(0xFF38BDF8),
+    );
+    expect(blueTickFinder, findsOneWidget);
+
+    // 4. Himon checks Founders Board and sees 'Seen by Darshana, Drishant'
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.darkTheme,
+          home: const ChatRoomScreen(threadId: 'founders-hq'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Seen by Darshana, Drishant'), findsOneWidget);
+  });
 }

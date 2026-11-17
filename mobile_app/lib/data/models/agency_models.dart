@@ -379,6 +379,7 @@ class ChatMessage {
   final Map<String, int> reactions;
   final bool isPinned;
   final bool isRead;
+  final List<String> seenBy;
 
   const ChatMessage({
     required this.id,
@@ -399,7 +400,13 @@ class ChatMessage {
     this.reactions = const {},
     this.isPinned = false,
     this.isRead = true,
+    this.seenBy = const [],
   });
+
+  List<String> get seenByOtherIds =>
+      seenBy.where((id) => id != senderId).toList();
+
+  bool get isSeenByOthers => seenBy.any((id) => id != senderId);
 
   ChatMessage copyWith({
     String? threadId,
@@ -408,6 +415,8 @@ class ChatMessage {
     String? attachmentUrl,
     Map<String, int>? reactions,
     bool? isPinned,
+    bool? isRead,
+    List<String>? seenBy,
   }) {
     return ChatMessage(
       id: id,
@@ -427,7 +436,8 @@ class ChatMessage {
       replyToPreview: replyToPreview,
       reactions: reactions ?? this.reactions,
       isPinned: isPinned ?? this.isPinned,
-      isRead: isRead,
+      isRead: isRead ?? this.isRead,
+      seenBy: seenBy ?? this.seenBy,
     );
   }
 }
