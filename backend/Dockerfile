@@ -3,7 +3,8 @@ FROM php:8.3-apache
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libcurl4-openssl-dev \
     && docker-php-ext-install pdo_mysql \
-    && a2enmod rewrite \
+    && a2dismod mpm_event mpm_worker || true \
+    && a2enmod mpm_prefork rewrite \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /var/www/html
@@ -15,5 +16,5 @@ RUN mkdir -p /var/www/uploads \
     && printf "<Directory /var/www/html>\n    AllowOverride All\n    FallbackResource /index.php\n</Directory>\n" > /etc/apache2/conf-available/bh-app.conf \
     && a2enconf bh-app
 
-CMD ["sh", "-c", "mkdir -p /var/www/uploads && chown -R www-data:www-data /var/www/uploads && PORT=${PORT:-80}; sed -i \"s/Listen 80/Listen $PORT/g\" /etc/apache2/ports.conf && sed -i \"s/:80>/:$PORT>/g\" /etc/apache2/sites-available/000-default.conf && exec apache2-foreground"]
+CMD ["sh", "-c", "rm -f /etc/apache2/mods-enabled/mpm_event.* /etc/apache2/mods-enabled/mpm_worker.* && mkdir -p /var/www/uploads && chown -R www-data:www-data /var/www/uploads && PORT=${PORT:-80}; sed -i \"s/Listen 80/Listen $PORT/g\" /etc/apache2/ports.conf && sed -i \"s/:80>/:$PORT>/g\" /etc/apache2/sites-available/000-default.conf && exec apache2-foreground"]
 
