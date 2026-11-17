@@ -938,4 +938,67 @@ void main() {
     await tester.pumpAndSettle();
     expect(container.read(agencyStoreProvider).unreadNotificationCount, 0);
   });
+
+  testWidgets(
+      '12. Meetings Calendar: Per-day date filtering & 10-minute pre-meeting alarm',
+      (WidgetTester tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final notifier = container.read(agencyStoreProvider.notifier);
+    final now = DateTime.now();
+    final todayBase = DateTime(now.year, now.month, now.day, 17, 0);
+    final tomorrow = todayBase.add(const Duration(days: 1));
+
+    // Schedule 2 meetings on today and 1 on tomorrow
+    notifier.scheduleMeeting(
+      title: 'Today Design Review',
+      clientOrCompany: 'Blue Hour Internal',
+      meetingType: 'Internal Meeting',
+      startTime: todayBase,
+      endTime: todayBase.add(const Duration(hours: 1)),
+      location: 'Google Meet',
+      participants: const ['Himon Bhuyan', 'Darshana Das'],
+      notes: 'Review UI screens',
+    );
+    notifier.scheduleMeeting(
+      title: 'Today Client Call',
+      clientOrCompany: 'NorthEast Tech',
+      meetingType: 'Client Meeting',
+      startTime: todayBase.add(const Duration(hours: 2)),
+      endTime: todayBase.add(const Duration(hours: 3)),
+      location: 'Zoom',
+      participants: const ['Himon Bhuyan'],
+      notes: 'Scope discussion',
+    );
+
+    final createdMtg = container.read(agencyStoreProvider).meetings.first;
+    expect(createdMtg.reminders, contains('Alarm 10m before'));
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.darkTheme,
+          home: const MeetingCalendarScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Today shows Today's 2 meetings
+    expect(find.text('Today Design Review'), findsOneWidget);
+    expect(find.text('Today Client Call'), findsOneWidget);
+
+    // Selecting tomorrow does NOT repeat today's meetings
+    final tomorrowKey = ValueKey(
+      'calendar_day_${tomorrow.year}_${tomorrow.month}_${tomorrow.day}',
+    );
+    await tester.tap(find.byKey(tomorrowKey));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Today Design Review'), findsNothing);
+    expect(find.text('Today Client Call'), findsNothing);
+    expect(find.textContaining('No meetings on'), findsOneWidget);
+  });
 }

@@ -44,6 +44,7 @@ class BhNotificationService {
   static const String _channelHigh = 'blue_hour_hq_high';
   static const String _channelMessages = 'blue_hour_hq_messages';
   static const String _channelMeetings = 'blue_hour_hq_meetings';
+  static const String _channelMeetingAlarms = 'blue_hour_hq_alarms';
   static const String _channelLeads = 'blue_hour_hq_leads';
 
   final FlutterLocalNotificationsPlugin _localPlugin =
@@ -126,6 +127,17 @@ class BhNotificationService {
               enableVibration: true,
             ),
           );
+          await androidPlugin.createNotificationChannel(
+            const AndroidNotificationChannel(
+              _channelMeetingAlarms,
+              'Meeting 10-Min Pre-Alarms',
+              description: 'Loud 10-minute pre-meeting wake alarms',
+              importance: Importance.max,
+              playSound: true,
+              enableVibration: true,
+              audioAttributesUsage: AudioAttributesUsage.alarm,
+            ),
+          );
         }
       }
 
@@ -141,13 +153,14 @@ class BhNotificationService {
 
     await ensurePluginInitialized();
 
-    // Request OS notification permissions smoothly
+    // Request OS notification & exact alarm permissions smoothly
     try {
       if (!kIsWeb && Platform.isAndroid) {
-        await _localPlugin
+        final androidPlugin = _localPlugin
             .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin>()
-            ?.requestNotificationsPermission();
+                AndroidFlutterLocalNotificationsPlugin>();
+        await androidPlugin?.requestNotificationsPermission();
+        await androidPlugin?.requestExactAlarmsPermission();
       } else if (!kIsWeb && Platform.isIOS) {
         await _localPlugin
             .resolvePlatformSpecificImplementation<
@@ -270,22 +283,31 @@ class BhNotificationService {
     }
   }
 
-  NotificationDetails _detailsForCategory(String category) {
-    final channelId = _channelForCategory(category);
-    final channelName = switch (category) {
-      'Messages' => 'Founders Direct Chat',
-      'Meetings' => 'Meetings & Calendar Reminders',
-      'Leads' => 'CRM Leads & Follow-ups',
-      _ => 'Blue Hour Executive Alerts',
-    };
+  NotificationDetails _detailsForCategory(
+    String category, {
+    bool isAlarm = false,
+  }) {
+    final channelId =
+        isAlarm ? _channelMeetingAlarms : _channelForCategory(category);
+    final channelName = isAlarm
+        ? 'Meeting 10-Min Pre-Alarms'
+        : switch (category) {
+            'Messages' => 'Founders Direct Chat',
+            'Meetings' => 'Meetings & Calendar Reminders',
+            'Leads' => 'CRM Leads & Follow-ups',
+            _ => 'Blue Hour Executive Alerts',
+          };
     return NotificationDetails(
       android: AndroidNotificationDetails(
         channelId,
         channelName,
         importance: Importance.max,
-        priority: Priority.high,
+        priority: isAlarm ? Priority.max : Priority.high,
         playSound: true,
         enableVibration: true,
+        category: isAlarm ? AndroidNotificationCategory.alarm : null,
+        audioAttributesUsage:
+            isAlarm ? AudioAttributesUsage.alarm : AudioAttributesUsage.notification,
         styleInformation: const BigTextStyleInformation(''),
       ),
       iOS: const DarwinNotificationDetails(
@@ -316,7 +338,8 @@ class BhNotificationService {
     } catch (_) {}
   }
 
-  /// Schedules native OS reminders (1 day, 1 hour, 15 minutes before, & at start).
+  /// Schedules native OS reminders & a 10-minute pre-meeting alarm
+  /// (1 day, 1 hour, 10 minutes alarm before, & at start).
   Future<void> scheduleReminderSequence({
     required String entityId,
     required String title,
@@ -327,48 +350,59 @@ class BhNotificationService {
   }) async {
     if (_isTestEnv) return;
     await ensurePluginInitialized();
+    await cancelReminderSequence(entityId);
     final now = DateTime.now();
 
-    final intervals = <(String label, Duration offset)>[
-      ('Tomorrow (1 day)', const Duration(days: 1)),
-      ('In 1 hour', const Duration(hours: 1)),
-      ('In 15 minutes', const Duration(minutes: 15)),
-      ('Starting now', Duration.zero),
+    final intervals = <(String label, Duration offset, bool isAlarm)>[
+      ('Tomorrow (1 day)', const Duration(days: 1), false),
+      ('In 1 hour', const Duration(hours: 1), false),
+      ('Alarm: Starts in 10 minutes', const Duration(minutes: 10), true),
+      ('Starting now', Duration.zero, true),
     ];
 
     for (var i = 0; i < intervals.length; i++) {
       final fireAt = targetTime.subtract(intervals[i].$2);
+      final isAlarm = intervals[i].$3;
       if (fireAt.isAfter(now.add(const Duration(seconds: 5)))) {
         try {
           final tzFire = tz.TZDateTime.from(fireAt, tz.local);
           final notifId = (entityId.hashCode + i) & 0x7FFFFFFF;
-          try {
-            await _localPlugin.zonedSchedule(
-              notifId,
-              '$title • ${intervals[i].$1}',
-              subtitle,
-              tzFire,
-              _detailsForCategory(category),
-              payload: targetRoute,
-              androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-              uiLocalNotificationDateInterpretation:
-                  UILocalNotificationDateInterpretation.absoluteTime,
-            );
-          } catch (_) {
-            await _localPlugin.zonedSchedule(
-              notifId,
-              '$title • ${intervals[i].$1}',
-              subtitle,
-              tzFire,
-              _detailsForCategory(category),
-              payload: targetRoute,
-              androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-              uiLocalNotificationDateInterpretation:
-                  UILocalNotificationDateInterpretation.absoluteTime,
-            );
+          final modes = <AndroidScheduleMode>[
+            if (isAlarm) AndroidScheduleMode.alarmClock,
+            AndroidScheduleMode.exactAllowWhileIdle,
+            AndroidScheduleMode.inexactAllowWhileIdle,
+          ];
+          for (final mode in modes) {
+            try {
+              await _localPlugin.zonedSchedule(
+                notifId,
+                '$title • ${intervals[i].$1}',
+                subtitle,
+                tzFire,
+                _detailsForCategory(category, isAlarm: isAlarm),
+                payload: targetRoute,
+                androidScheduleMode: mode,
+                uiLocalNotificationDateInterpretation:
+                    UILocalNotificationDateInterpretation.absoluteTime,
+              );
+              break;
+            } catch (_) {
+              // Fallback to next schedule mode
+            }
           }
         } catch (_) {}
       }
+    }
+  }
+
+  Future<void> cancelReminderSequence(String entityId) async {
+    if (_isTestEnv) return;
+    await ensurePluginInitialized();
+    for (var i = 0; i < 4; i++) {
+      final notifId = (entityId.hashCode + i) & 0x7FFFFFFF;
+      try {
+        await _localPlugin.cancel(notifId);
+      } catch (_) {}
     }
   }
 

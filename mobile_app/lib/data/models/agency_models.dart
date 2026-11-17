@@ -718,7 +718,12 @@ class MeetingRecord {
     required this.assignedEmployee,
     this.status = 'Scheduled',
     this.notes = '',
-    this.reminders = const ['1 day before', '1 hour before', '15m before', 'At start'],
+    this.reminders = const [
+      '1 day before',
+      '1 hour before',
+      'Alarm 10m before',
+      'At start',
+    ],
   });
 
   bool get hasOnlineLink =>

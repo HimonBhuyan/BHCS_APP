@@ -16,9 +16,23 @@ class MeetingCalendarScreen extends ConsumerStatefulWidget {
 }
 
 class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
-  int _selectedDayOffset = 0; // 0 = Today
+  late DateTime _selectedDate;
   String _selectedTypeFilter = 'All';
   bool _showMonthGrid = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedDate = _dateOnly(DateTime.now());
+  }
+
+  DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  DateTime _combineDateAndTime(DateTime date, TimeOfDay tod) =>
+      DateTime(date.year, date.month, date.day, tod.hour, tod.minute);
 
   void _showScheduleMeetingModal() {
     final titleCtrl = TextEditingController();
@@ -29,6 +43,13 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
     final locationCtrl = TextEditingController(text: 'Google Meet');
     final notesCtrl = TextEditingController();
     String selectedType = MeetingRecord.meetingTypes.first;
+    DateTime pickedDate = _selectedDate;
+    final defaultStart = DateTime.now().add(const Duration(minutes: 30));
+    TimeOfDay pickedStartTime = TimeOfDay(
+      hour: defaultStart.hour,
+      minute: (defaultStart.minute ~/ 5) * 5,
+    );
+    int durationMinutes = 60;
     final selectedParticipants = <String>{
       'Himon Bhuyan',
       'Darshana Das',
@@ -42,10 +63,17 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
         final employees = ref.read(agencyStoreProvider).employees;
         return StatefulBuilder(
           builder: (ctx, setModalState) {
+            final previewStart =
+                _combineDateAndTime(pickedDate, pickedStartTime);
+            final previewEnd =
+                previewStart.add(Duration(minutes: durationMinutes));
+            final alarmAt =
+                previewStart.subtract(const Duration(minutes: 10));
+
             return DraggableScrollableSheet(
-              initialChildSize: 0.86,
+              initialChildSize: 0.88,
               minChildSize: 0.6,
-              maxChildSize: 0.94,
+              maxChildSize: 0.95,
               expand: false,
               builder: (context, scrollController) {
                 return Padding(
@@ -63,7 +91,7 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
                         style: Theme.of(ctx).textTheme.headlineMedium,
                       ),
                       Text(
-                        'Automatic FCM reminders (1d, 1h, 15m, 0m) will be dispatched to all participants.',
+                        'Includes a 10-minute pre-meeting wake alarm + FCM push to participants.',
                         style: Theme.of(ctx).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 14),
@@ -72,6 +100,128 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Meeting Title *',
                           prefixIcon: Icon(Icons.title_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(
+                                Icons.calendar_today_rounded,
+                                size: 16,
+                              ),
+                              label: Text(
+                                BhFormatters.dayMonth(pickedDate),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              onPressed: () async {
+                                final res = await showDatePicker(
+                                  context: ctx,
+                                  initialDate: pickedDate,
+                                  firstDate: DateTime.now()
+                                      .subtract(const Duration(days: 90)),
+                                  lastDate: DateTime.now()
+                                      .add(const Duration(days: 365)),
+                                );
+                                if (res != null) {
+                                  setModalState(
+                                    () => pickedDate = _dateOnly(res),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(
+                                Icons.access_time_filled_rounded,
+                                size: 17,
+                              ),
+                              label: Text(
+                                BhFormatters.time12h(previewStart),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              onPressed: () async {
+                                final res = await showTimePicker(
+                                  context: ctx,
+                                  initialTime: pickedStartTime,
+                                );
+                                if (res != null) {
+                                  setModalState(() => pickedStartTime = res);
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          const Text(
+                            'Duration:',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          for (final mins in [30, 60, 90, 120])
+                            ChoiceChip(
+                              label: Text(
+                                mins == 60
+                                    ? '1 hr'
+                                    : (mins == 90
+                                        ? '1.5 hr'
+                                        : (mins == 120 ? '2 hr' : '${mins}m')),
+                                style: const TextStyle(fontSize: 11.5),
+                              ),
+                              selected: durationMinutes == mins,
+                              onSelected: (_) =>
+                                  setModalState(() => durationMinutes = mins),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.electricBlue.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color:
+                                AppColors.electricBlue.withValues(alpha: 0.35),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.alarm_on_rounded,
+                              size: 16,
+                              color: AppColors.electricBlue,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '${BhFormatters.time12h(previewStart)} – ${BhFormatters.time12h(previewEnd)} • Alarm triggers 10 min before (${BhFormatters.time12h(alarmAt)})',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.electricBlue,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -182,15 +332,12 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
                         child: ElevatedButton.icon(
                           onPressed: () {
                             if (titleCtrl.text.trim().isEmpty) return;
-                            final baseDay = DateTime.now()
-                                .add(Duration(days: _selectedDayOffset));
-                            final start = DateTime(
-                              baseDay.year,
-                              baseDay.month,
-                              baseDay.day,
-                              16,
-                              30,
+                            final start = _combineDateAndTime(
+                              pickedDate,
+                              pickedStartTime,
                             );
+                            final end =
+                                start.add(Duration(minutes: durationMinutes));
                             ref
                                 .read(agencyStoreProvider.notifier)
                                 .scheduleMeeting(
@@ -198,7 +345,7 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
                                   clientOrCompany: clientCtrl.text.trim(),
                                   meetingType: selectedType,
                                   startTime: start,
-                                  endTime: start.add(const Duration(hours: 1)),
+                                  endTime: end,
                                   location: locationCtrl.text.trim(),
                                   onlineLink: linkCtrl.text.trim().isEmpty
                                       ? null
@@ -206,17 +353,18 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
                                   participants: selectedParticipants.toList(),
                                   notes: notesCtrl.text.trim(),
                                 );
+                            setState(() => _selectedDate = pickedDate);
                             Navigator.pop(ctx);
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(
-                                  'Meeting "${titleCtrl.text.trim()}" scheduled with ${selectedParticipants.length} participants.',
+                                  'Scheduled "${titleCtrl.text.trim()}" at ${BhFormatters.time12h(start)} • Alarm set 10m before.',
                                 ),
                               ),
                             );
                           },
                           icon: const Icon(Icons.event_available_rounded),
-                          label: const Text('Schedule & Send FCM Invites'),
+                          label: const Text('Schedule & Set 10m Alarm'),
                         ),
                       ),
                     ],
@@ -230,19 +378,187 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
     );
   }
 
+  Future<void> _showEditMeetingModal(MeetingRecord mtg) async {
+    final tCtrl = TextEditingController(text: mtg.title);
+    final cCtrl = TextEditingController(text: mtg.clientOrCompany);
+    final lCtrl = TextEditingController(text: mtg.location);
+    final linkCtrl =
+        TextEditingController(text: mtg.onlineMeetingLink ?? '');
+    final nCtrl = TextEditingController(text: mtg.notes);
+    DateTime pickedDate = _dateOnly(mtg.startTime);
+    TimeOfDay pickedStart = TimeOfDay.fromDateTime(mtg.startTime);
+    var durationMinutes =
+        mtg.endTime.difference(mtg.startTime).inMinutes.clamp(15, 480);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          final startPreview = _combineDateAndTime(pickedDate, pickedStart);
+          final endPreview =
+              startPreview.add(Duration(minutes: durationMinutes));
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 20,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Edit Meeting',
+                    style: Theme.of(ctx).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: tCtrl,
+                    decoration: const InputDecoration(labelText: 'Title *'),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.calendar_today_rounded,
+                              size: 16),
+                          label: Text(BhFormatters.dayMonth(pickedDate)),
+                          onPressed: () async {
+                            final res = await showDatePicker(
+                              context: ctx,
+                              initialDate: pickedDate,
+                              firstDate: DateTime.now()
+                                  .subtract(const Duration(days: 90)),
+                              lastDate: DateTime.now()
+                                  .add(const Duration(days: 365)),
+                            );
+                            if (res != null) {
+                              setModalState(() => pickedDate = _dateOnly(res));
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.access_time_rounded, size: 16),
+                          label: Text(BhFormatters.time12h(startPreview)),
+                          onPressed: () async {
+                            final res = await showTimePicker(
+                              context: ctx,
+                              initialTime: pickedStart,
+                            );
+                            if (res != null) {
+                              setModalState(() => pickedStart = res);
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '⏰ ${BhFormatters.time12h(startPreview)} – ${BhFormatters.time12h(endPreview)} • Alarm triggers 10m before',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.electricBlue,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: cCtrl,
+                    decoration:
+                        const InputDecoration(labelText: 'Client / Topic'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: linkCtrl,
+                    decoration:
+                        const InputDecoration(labelText: 'Meeting Link'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: nCtrl,
+                    decoration: const InputDecoration(labelText: 'Notes'),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.error,
+                          ),
+                          onPressed: () {
+                            ref
+                                .read(agencyStoreProvider.notifier)
+                                .deleteMeeting(mtg.id);
+                            Navigator.pop(ctx);
+                          },
+                          child: const Text('Cancel Mtg'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () {
+                            if (tCtrl.text.trim().isEmpty) return;
+                            final newStart =
+                                _combineDateAndTime(pickedDate, pickedStart);
+                            final newEnd = newStart
+                                .add(Duration(minutes: durationMinutes));
+                            ref
+                                .read(agencyStoreProvider.notifier)
+                                .updateMeeting(
+                                  meetingId: mtg.id,
+                                  title: tCtrl.text.trim(),
+                                  clientOrCompany: cCtrl.text.trim(),
+                                  meetingType: mtg.meetingType,
+                                  location: lCtrl.text.trim(),
+                                  onlineLink: linkCtrl.text.trim(),
+                                  startTime: newStart,
+                                  endTime: newEnd,
+                                  notes: nCtrl.text.trim(),
+                                );
+                            setState(() => _selectedDate = pickedDate);
+                            Navigator.pop(ctx);
+                          },
+                          child: const Text('Save Changes'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(agencyStoreProvider);
     final textTheme = Theme.of(context).textTheme;
-    final today = DateTime.now();
+    final today = _dateOnly(DateTime.now());
 
     final filteredMeetings = state.meetings.where((m) {
+      if (!_isSameDay(m.startTime, _selectedDate)) {
+        return false;
+      }
       if (_selectedTypeFilter != 'All' &&
           m.meetingType != _selectedTypeFilter) {
         return false;
       }
       return true;
-    }).toList();
+    }).toList()
+      ..sort((a, b) => a.startTime.compareTo(b.startTime));
 
     final canPop = GoRouter.maybeOf(context)?.canPop() ?? true;
 
@@ -287,26 +603,29 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
             BhSurfaceCard(
               padding: const EdgeInsets.all(8),
               child: CalendarDatePicker(
-                initialDate: today.add(Duration(days: _selectedDayOffset)),
+                initialDate: _selectedDate,
                 firstDate: today.subtract(const Duration(days: 90)),
                 lastDate: today.add(const Duration(days: 180)),
                 onDateChanged: (picked) {
                   setState(() {
-                    _selectedDayOffset = picked.difference(today).inDays;
+                    _selectedDate = _dateOnly(picked);
                   });
                 },
               ),
             )
           else
             SizedBox(
-              height: 82,
+              height: 88,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: 14,
                 separatorBuilder: (_, _) => const SizedBox(width: 10),
                 itemBuilder: (context, index) {
                   final date = today.add(Duration(days: index));
-                  final selected = _selectedDayOffset == index;
+                  final selected = _isSameDay(date, _selectedDate);
+                  final dayCount = state.meetings
+                      .where((m) => _isSameDay(m.startTime, date))
+                      .length;
                   const weekdays = [
                     'Mon',
                     'Tue',
@@ -317,10 +636,11 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
                     'Sun',
                   ];
                   return InkWell(
-                    onTap: () => setState(() => _selectedDayOffset = index),
+                    key: ValueKey('calendar_day_${date.year}_${date.month}_${date.day}'),
+                    onTap: () => setState(() => _selectedDate = _dateOnly(date)),
                     borderRadius: BorderRadius.circular(18),
                     child: Container(
-                      width: 62,
+                      width: 64,
                       decoration: BoxDecoration(
                         gradient: selected ? AppColors.brandGradient : null,
                         color: selected
@@ -348,7 +668,7 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
                                   : AppColors.darkTextSecondary,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 2),
                           Text(
                             '${date.day}',
                             style: TextStyle(
@@ -357,6 +677,33 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
                               color: selected ? Colors.white : null,
                             ),
                           ),
+                          const SizedBox(height: 3),
+                          if (dayCount > 0)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? Colors.white.withValues(alpha: 0.22)
+                                    : AppColors.electricBlue
+                                        .withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                '$dayCount mtg',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: selected
+                                      ? Colors.white
+                                      : AppColors.electricBlue,
+                                ),
+                              ),
+                            )
+                          else
+                            const SizedBox(height: 12),
                         ],
                       ),
                     ),
@@ -397,7 +744,7 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
 
           BhSectionHeader(
             kicker: 'STUDIO CALENDAR',
-            title: 'Scheduled Meetings',
+            title: 'Meetings • ${BhFormatters.dayMonth(_selectedDate)}',
             countBadge: filteredMeetings.length,
           ),
           const SizedBox(height: 10),
@@ -405,9 +752,9 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
           if (filteredMeetings.isEmpty)
             BhArtisticEmptyState(
               icon: Icons.event_available_rounded,
-              title: 'No meetings scheduled yet',
+              title: 'No meetings on ${BhFormatters.dayMonth(_selectedDate)}',
               subtitle:
-                  'Schedule client discovery calls, architecture reviews, or Founder syncs with automatic FCM reminders.',
+                  'Tap Schedule Meeting to pick a date & time. A 10-minute pre-meeting alarm is set automatically.',
               actionLabel: '+ Schedule Meeting',
               onAction: _showScheduleMeetingModal,
             )
@@ -493,133 +840,7 @@ class _MeetingCalendarScreenState extends ConsumerState<MeetingCalendarScreen> {
                         Row(
                           children: [
                             TextButton(
-                              onPressed: () async {
-                                final tCtrl =
-                                    TextEditingController(text: mtg.title);
-                                final cCtrl = TextEditingController(
-                                    text: mtg.clientOrCompany);
-                                final lCtrl =
-                                    TextEditingController(text: mtg.location);
-                                final linkCtrl = TextEditingController(
-                                    text: mtg.onlineMeetingLink ?? '');
-                                final nCtrl =
-                                    TextEditingController(text: mtg.notes);
-                                await showModalBottomSheet<void>(
-                                  context: context,
-                                  isScrollControlled: true,
-                                  builder: (ctx) => Padding(
-                                    padding: EdgeInsets.only(
-                                      left: 20,
-                                      right: 20,
-                                      top: 20,
-                                      bottom: MediaQuery.of(ctx)
-                                              .viewInsets
-                                              .bottom +
-                                          24,
-                                    ),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'Edit Meeting',
-                                          style: Theme.of(ctx)
-                                              .textTheme
-                                              .headlineSmall,
-                                        ),
-                                        const SizedBox(height: 12),
-                                        TextField(
-                                          controller: tCtrl,
-                                          decoration: const InputDecoration(
-                                            labelText: 'Title *',
-                                          ),
-                                        ),
-                                        const SizedBox(height: 10),
-                                        TextField(
-                                          controller: cCtrl,
-                                          decoration: const InputDecoration(
-                                            labelText: 'Client / Topic',
-                                          ),
-                                        ),
-                                        const SizedBox(height: 10),
-                                        TextField(
-                                          controller: linkCtrl,
-                                          decoration: const InputDecoration(
-                                            labelText: 'Meeting Link',
-                                          ),
-                                        ),
-                                        const SizedBox(height: 10),
-                                        TextField(
-                                          controller: nCtrl,
-                                          decoration: const InputDecoration(
-                                            labelText: 'Notes',
-                                          ),
-                                        ),
-                                        const SizedBox(height: 14),
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: OutlinedButton(
-                                                style: OutlinedButton.styleFrom(
-                                                  foregroundColor:
-                                                      AppColors.error,
-                                                ),
-                                                onPressed: () {
-                                                  ref
-                                                      .read(agencyStoreProvider
-                                                          .notifier)
-                                                      .deleteMeeting(mtg.id);
-                                                  Navigator.pop(ctx);
-                                                },
-                                                child: const Text('Cancel Mtg'),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 10),
-                                            Expanded(
-                                              child: FilledButton(
-                                                onPressed: () {
-                                                  if (tCtrl.text
-                                                      .trim()
-                                                      .isEmpty) {
-                                                    return;
-                                                  }
-                                                  ref
-                                                      .read(agencyStoreProvider
-                                                          .notifier)
-                                                      .updateMeeting(
-                                                        meetingId: mtg.id,
-                                                        title:
-                                                            tCtrl.text.trim(),
-                                                        clientOrCompany:
-                                                            cCtrl.text.trim(),
-                                                        meetingType:
-                                                            mtg.meetingType,
-                                                        location:
-                                                            lCtrl.text.trim(),
-                                                        onlineLink:
-                                                            linkCtrl.text.trim(),
-                                                        startTime: mtg.startTime
-                                                            .add(const Duration(
-                                                                hours: 1)),
-                                                        endTime: mtg.endTime
-                                                            .add(const Duration(
-                                                                hours: 1)),
-                                                        notes:
-                                                            nCtrl.text.trim(),
-                                                      );
-                                                  Navigator.pop(ctx);
-                                                },
-                                                child: const Text('Save +1hr'),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
+                              onPressed: () => _showEditMeetingModal(mtg),
                               child: const Text('Edit'),
                             ),
                             if (mtg.hasOnlineLink)

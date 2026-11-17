@@ -2241,7 +2241,7 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
       category: 'Meetings',
       title: 'Meeting Scheduled: $title',
       body:
-          '$clientOrCompany • ${BhFormatters.dateTimeShort(startTime)} (Reminders: 1d, 1h, 15m)',
+          '$clientOrCompany • ${BhFormatters.dateTimeShort(startTime)} (Alarm: 10m before • Reminders: 1d, 1h)',
       timestamp: now,
       targetRoute: '/calendar',
       entityId: mtg.id,
@@ -2508,13 +2508,40 @@ class AgencyStoreNotifier extends Notifier<AgencyAppState> {
         status: 'Rescheduled',
       );
     }).toList();
-    state = state.copyWith(meetings: updated);
+    final notif = _buildNotification(
+      category: 'Meetings',
+      title: 'Meeting Rescheduled: $title',
+      body:
+          '${clientOrCompany.isEmpty ? 'Studio Sync' : clientOrCompany} • ${BhFormatters.dateTimeShort(startTime)} (Alarm: 10m before)',
+      targetRoute: '/calendar',
+      entityId: meetingId,
+      actions: const ['View Meeting'],
+    );
+    state = state.copyWith(
+      meetings: updated,
+      notifications: [notif, ...state.notifications],
+    );
+    if (state.notificationPrefs.meetingReminders) {
+      unawaited(
+        BhNotificationService.instance.scheduleReminderSequence(
+          entityId: meetingId,
+          title: 'Meeting: $title',
+          subtitle:
+              '${clientOrCompany.isEmpty ? 'Studio Sync' : clientOrCompany} • $location',
+          targetTime: startTime,
+          category: 'Meetings',
+          targetRoute: '/calendar',
+        ),
+      );
+    }
+    _pushRemoteNotification(notif);
   }
 
   void deleteMeeting(String meetingId) {
     state = state.copyWith(
       meetings: state.meetings.where((m) => m.id != meetingId).toList(),
     );
+    unawaited(BhNotificationService.instance.cancelReminderSequence(meetingId));
   }
 
   void updateProposalStatus(String proposalId, String nextStatus) {
